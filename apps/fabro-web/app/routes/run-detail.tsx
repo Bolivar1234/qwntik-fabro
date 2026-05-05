@@ -1,6 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { ArrowPathIcon, ChevronRightIcon } from "@heroicons/react/20/solid";
-import { Link, Outlet, useLocation } from "react-router";
+import { Link, Outlet, useLocation, useMatches } from "react-router";
 
 import { InterviewDock } from "../components/interview-dock";
 import { SteerComposer } from "../components/steer-composer";
@@ -50,6 +55,10 @@ const CANCEL_BUTTON_CLASS =
 
 const MUTATION_BUTTON_CLASS =
   `${SECONDARY_BUTTON_CLASS} disabled:cursor-not-allowed disabled:opacity-60`;
+
+function classNames(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
 
 type RunDetailRun = ReturnType<typeof mapRunSummaryToRunItem> & {
   statusLabel: string;
@@ -109,6 +118,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const questionsQuery = useRunQuestions(params.id, isBlocked);
   const pendingQuestions = questionsQuery.data ?? [];
   const { pathname } = useLocation();
+  const matches = useMatches();
   const basePath = `/runs/${params.id}`;
   const previewMutation = usePreviewRun(params.id);
   const cancelMutation = useCancelRun(params.id);
@@ -118,6 +128,9 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const tabs = allTabs.filter((t) => !t.demoOnly || demoMode);
   const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);
   const [steerOpen, setSteerOpen] = useState(false);
+  const fullHeight = matches.some(
+    (m) => (m.handle as { fullHeight?: boolean } | undefined)?.fullHeight,
+  );
 
   useRunEvents(params.id);
   useRunToasts(params.id);
@@ -175,10 +188,22 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const cancelPending = cancelMutation.isMutating;
   const archivePending = archiveMutation.isMutating;
   const unarchivePending = unarchiveMutation.isMutating;
+  const hasPendingQuestions = isBlocked && pendingQuestions.length > 0;
+  const rootStyle = fullHeight && hasPendingQuestions
+    ? ({ "--fabro-interview-dock-clearance": "18rem" } as CSSProperties)
+    : undefined;
 
   return (
-    <div>
-      <nav className="mb-4 flex items-center gap-1 text-sm text-fg-muted">
+    <div
+      className={fullHeight ? "flex h-full min-h-0 flex-col" : undefined}
+      style={rootStyle}
+    >
+      <nav
+        className={classNames(
+          "mb-4 flex items-center gap-1 text-sm text-fg-muted",
+          fullHeight && "shrink-0",
+        )}
+      >
         <Link to="/runs" className="text-fg-3 hover:text-fg">Runs</Link>
         {demoMode && (
           <>
@@ -192,7 +217,12 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         <span>{run.title}</span>
       </nav>
 
-      <div className="mb-6 flex flex-wrap items-start gap-4">
+      <div
+        className={classNames(
+          "mb-6 flex flex-wrap items-start gap-4",
+          fullHeight && "shrink-0",
+        )}
+      >
         <div className="min-w-0 flex-1">
           <h2 className="text-xl font-semibold text-fg">{run.title}</h2>
           <div className="mt-2 flex items-center gap-3 text-sm">
@@ -281,7 +311,9 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         </div>
       </div>
 
-      <div className="border-b border-line">
+      <div
+        className={classNames("border-b border-line", fullHeight && "shrink-0")}
+      >
         <nav className="-mb-px flex gap-6">
           {tabs.map((tab) => {
             const tabPath = `${basePath}${tab.path}`;
@@ -312,7 +344,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         </nav>
       </div>
 
-      <div className="mt-6">
+      <div className={fullHeight ? "mt-6 min-h-0 flex-1" : "mt-6"}>
         <Outlet />
       </div>
 
@@ -322,11 +354,15 @@ export default function RunDetail({ params }: { params: { id: string } }) {
         onClose={() => setSteerOpen(false)}
       />
 
-      {isBlocked && pendingQuestions.length > 0 && (
-        <>
-          <div aria-hidden="true" className="h-72" />
+      {hasPendingQuestions && (
+        fullHeight ? (
           <InterviewDock runId={params.id} questions={pendingQuestions} />
-        </>
+        ) : (
+          <>
+            <div aria-hidden="true" className="h-72" />
+            <InterviewDock runId={params.id} questions={pendingQuestions} />
+          </>
+        )
       )}
     </div>
   );

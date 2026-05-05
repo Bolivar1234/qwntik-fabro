@@ -1,5 +1,5 @@
 import { watch as fsWatch } from "node:fs";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 
 declare const Bun: any;
@@ -10,6 +10,8 @@ const distDir = join(rootPath, "dist");
 const assetsDir = join(distDir, "assets");
 const publicDir = join(rootPath, "public");
 const templatePath = join(rootPath, "index.template.html");
+const pierreWorkerDir = join(rootPath, "node_modules", "@pierre", "diffs", "dist", "worker");
+const pierreWorkerAssetsDir = join(assetsDir, "pierre-diffs-worker");
 const watch = Bun.argv.includes("--watch");
 
 async function buildOnce() {
@@ -48,7 +50,22 @@ async function buildOnce() {
   }
 
   await cp(publicDir, distDir, { recursive: true });
+  await copyPierreWorkerAssets();
   await writeIndexHtml(result.outputs.map((output: any) => relative(distDir, output.path)));
+}
+
+async function copyPierreWorkerAssets() {
+  await mkdir(pierreWorkerAssetsDir, { recursive: true });
+  await cp(
+    join(pierreWorkerDir, "worker-portable.js"),
+    join(pierreWorkerAssetsDir, "worker-portable.js"),
+  );
+
+  const files = await readdir(pierreWorkerDir);
+  for (const file of files) {
+    if (!/^wasm-.*\.js$/.test(file)) continue;
+    await cp(join(pierreWorkerDir, file), join(pierreWorkerAssetsDir, file));
+  }
 }
 
 async function writeIndexHtml(outputs: string[]) {

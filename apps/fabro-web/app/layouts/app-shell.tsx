@@ -68,6 +68,9 @@ export default function AppShell() {
   const headerExtra = handle?.headerExtra;
   const hideHeader = matches.some((m) => (m.handle as { hideHeader?: boolean } | undefined)?.hideHeader);
   const wide = matches.some((m) => (m.handle as { wide?: boolean } | undefined)?.wide);
+  const fullHeight = matches.some(
+    (m) => (m.handle as { fullHeight?: boolean } | undefined)?.fullHeight,
+  );
   const maxWidth = wide ? "" : "max-w-5xl";
 
   async function toggleDemoMode() {
@@ -77,8 +80,16 @@ export default function AppShell() {
   return (
     <DemoModeProvider value={demoMode}>
     <ToastProvider>
-    <div className="isolate min-h-full">
-      <Disclosure as="nav" className="bg-panel">
+    <div
+      className={classNames(
+        "isolate",
+        fullHeight ? "flex min-h-dvh flex-col" : "min-h-full",
+      )}
+    >
+      <Disclosure
+        as="nav"
+        className={classNames("bg-panel", fullHeight && "shrink-0")}
+      >
         <div className="px-4 sm:px-6 lg:px-8">
           <div className="flex h-16 items-center justify-between">
             <div className="flex items-center">
@@ -244,7 +255,12 @@ export default function AppShell() {
       </Disclosure>
 
       {!hideHeader && (
-        <header className="relative bg-panel after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-line-strong">
+        <header
+          className={classNames(
+            "relative bg-panel after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-line-strong",
+            fullHeight && "shrink-0",
+          )}
+        >
           <div className={`mx-auto ${maxWidth} px-4 py-4 sm:px-6 lg:px-8`}>
             <div className="flex items-center">
               <h1 className="text-xl font-semibold tracking-tight text-fg">
@@ -255,8 +271,13 @@ export default function AppShell() {
           </div>
         </header>
       )}
-      <main>
-        <div className={`mx-auto ${maxWidth} px-4 py-6 sm:px-6 lg:px-8`}>
+      <main className={fullHeight ? "min-h-0 flex-1" : undefined}>
+        <div
+          className={classNames(
+            `mx-auto ${maxWidth} px-4 py-6 sm:px-6 lg:px-8`,
+            fullHeight && "box-border flex h-full min-h-0 flex-col",
+          )}
+        >
           <Outlet />
         </div>
       </main>

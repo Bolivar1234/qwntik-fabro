@@ -1,11 +1,157 @@
-import { describe, expect, test } from "bun:test";
-
+import { afterEach, describe, expect, mock, test } from "bun:test";
+import { createElement } from "react";
+import TestRenderer, { act } from "react-test-renderer";
 import {
+  createMemoryRouter,
+  RouterProvider,
+  useParams,
+} from "react-router";
+import { QuestionType } from "@qltysh/fabro-api-client";
+
+import { ToastProvider } from "../components/toast";
+import { DemoModeProvider } from "../lib/demo-mode";
+
+let currentRunSummary: any = null;
+let currentQuestions: any[] = [];
+const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
+
+function noopMutation() {
+  return {
+    data:       undefined,
+    isMutating: false,
+    trigger:    mock(() => Promise.resolve()),
+    reset:      mock(() => undefined),
+  };
+}
+
+mock.module("../lib/queries", () => ({
+  useRun: () => ({
+    data:      currentRunSummary,
+    isLoading: false,
+  }),
+  useRunQuestions: () => ({
+    data: currentQuestions,
+  }),
+  useRunFiles: () => ({
+    data:         null,
+    error:        null,
+    isLoading:    false,
+    isValidating: false,
+    mutate:       mock(() => Promise.resolve(null)),
+  }),
+}));
+
+mock.module("../lib/mutations", () => ({
+  useArchiveRun:           () => noopMutation(),
+  useCancelRun:            () => noopMutation(),
+  usePreviewRun:           () => noopMutation(),
+  useSteerRun:             () => noopMutation(),
+  useSubmitInterviewAnswer: () => noopMutation(),
+  useUnarchiveRun:         () => noopMutation(),
+}));
+
+mock.module("../lib/run-events", () => ({
+  useRunEvents: () => undefined,
+}));
+
+mock.module("../hooks/use-run-toasts", () => ({
+  useRunToasts: () => undefined,
+}));
+
+const {
+  default: RunDetail,
   handleLifecycleToastResult,
   lifecycleActionVisibility,
-  type LifecycleToastState,
-  type RunDetailActionResult,
-} from "./run-detail";
+} = await import("./run-detail");
+type LifecycleToastState = import("./run-detail").LifecycleToastState;
+type RunDetailActionResult = import("./run-detail").RunDetailActionResult;
+
+const h = createElement;
+
+function makeRunSummary(status = "succeeded") {
+  return {
+    run_id:          "run_1",
+    title:           "Run 1",
+    repository:      { name: "fabro" },
+    status:          { kind: status },
+    workflow_slug:   "default",
+    workflow_name:   "Default",
+    duration_ms:     null,
+    elapsed_secs:    null,
+    source_directory: null,
+  };
+}
+
+function makeQuestion() {
+  return {
+    id:              "q_1",
+    text:            "Approve?",
+    stage:           "review",
+    question_type:   QuestionType.YES_NO,
+    options:         [],
+    allow_freeform:  false,
+    timeout_seconds: null,
+    context_display: null,
+  };
+}
+
+function RunDetailWithParams() {
+  const params = useParams();
+  return h(RunDetail, { params: params as { id: string } });
+}
+
+async function renderRunDetail({
+  initialEntry,
+  status = "succeeded",
+  questions = [],
+}: {
+  initialEntry: string;
+  status?: string;
+  questions?: any[];
+}) {
+  currentRunSummary = makeRunSummary(status);
+  currentQuestions = questions;
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+  const router = createMemoryRouter(
+    [
+      {
+        path:    "/runs/:id",
+        element: h(RunDetailWithParams),
+        children: [
+          {
+            index:   true,
+            element: h("div", { "data-child-route": "overview" }, "Overview"),
+          },
+          {
+            path:    "files",
+            handle:  { fullHeight: true },
+            element: h("div", { "data-child-route": "files" }, "Files"),
+          },
+        ],
+      },
+    ],
+    { initialEntries: [initialEntry] },
+  );
+
+  let renderer: TestRenderer.ReactTestRenderer | undefined;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      h(
+        DemoModeProvider,
+        { value: false },
+        h(ToastProvider, null, h(RouterProvider, { router })),
+      ),
+    );
+  });
+  mountedRenderers.push(renderer!);
+  return renderer!;
+}
+
+function hasClasses(value: unknown, classes: string[]) {
+  const tokens = String(value ?? "").split(/\s+/);
+  return classes.every((className) => tokens.includes(className));
+}
 
 describe("lifecycleActionVisibility", () => {
   test("shows cancel for active cancellable states and hides it elsewhere", () => {
@@ -148,5 +294,82 @@ describe("handleLifecycleToastResult", () => {
     expect(dismissed).toEqual(["toast-9"]);
     expect(pushed).toEqual([{ message: "Run restored." }]);
     expect(replayedState).toBe(nextState);
+  });
+});
+
+describe("RunDetail full-height child routes", () => {
+  afterEach(() => {
+    act(() => {
+      for (const renderer of mountedRenderers.splice(0)) {
+        renderer.unmount();
+      }
+    });
+    currentRunSummary = null;
+    currentQuestions = [];
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  test("uses a full-height flex wrapper for fullHeight child routes", async () => {
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1/files",
+    });
+
+    const fullHeightRoot = renderer.root.findAll(
+      (node) =>
+        node.type === "div" &&
+        hasClasses(node.props.className, ["h-full", "min-h-0", "flex", "flex-col"]),
+    );
+    expect(fullHeightRoot.length).toBeGreaterThan(0);
+
+    const outletWrappers = renderer.root.findAll(
+      (node) =>
+        node.type === "div" &&
+        hasClasses(node.props.className, ["mt-6", "min-h-0", "flex-1"]),
+    );
+    expect(outletWrappers).toHaveLength(1);
+  });
+
+  test("keeps blocked full-height children clear of the interview dock without an h-72 sibling", async () => {
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1/files",
+      status:       "blocked",
+      questions:    [makeQuestion()],
+    });
+
+    const spacers = renderer.root.findAll(
+      (node) => node.type === "div" && hasClasses(node.props.className, ["h-72"]),
+    );
+    expect(spacers).toHaveLength(0);
+
+    const dock = renderer.root.findAllByProps({
+      role:       "region",
+      "aria-label": "Interview question",
+    });
+    expect(dock).toHaveLength(1);
+
+    const clearanceOwners = renderer.root.findAll(
+      (node) =>
+        node.type === "div" &&
+        node.props.style?.["--fabro-interview-dock-clearance"] === "18rem",
+    );
+    expect(clearanceOwners.length).toBeGreaterThan(0);
+  });
+
+  test("preserves document-flow layout for child routes without fullHeight", async () => {
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1",
+    });
+
+    const fullHeightRoot = renderer.root.findAll(
+      (node) =>
+        node.type === "div" &&
+        hasClasses(node.props.className, ["h-full", "min-h-0", "flex", "flex-col"]),
+    );
+    expect(fullHeightRoot).toHaveLength(0);
+
+    const outletWrappers = renderer.root.findAll(
+      (node) => node.type === "div" && node.props.className === "mt-6",
+    );
+    expect(outletWrappers).toHaveLength(1);
   });
 });

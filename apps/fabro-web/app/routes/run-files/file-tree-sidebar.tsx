@@ -173,7 +173,7 @@ export function FileTreeSidebar({
     <aside
       aria-label="Changed files"
       style={themeStyles}
-      className="sticky top-4 flex h-[calc(100vh-6rem)] w-72 shrink-0 flex-col gap-2 self-start"
+      className="flex min-h-0 w-72 shrink-0 flex-col gap-2 self-stretch"
     >
       <input
         type="search"
