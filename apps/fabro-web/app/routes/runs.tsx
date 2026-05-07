@@ -23,6 +23,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { ciConfig, columnStatusDisplay, columnStatuses, deriveCiStatus, mapRunListItem } from "../data/runs";
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
+import { formatRelativeTime } from "../lib/format";
 import { EmptyState } from "../components/state";
 import { SteerComposer } from "../components/steer-composer";
 import { useToast } from "../components/toast";
@@ -630,8 +631,9 @@ function RunRow({ run }: { run: RunWithStatus }) {
         {run.elapsed}
       </span>
 
+      <span className="truncate font-mono text-xs font-medium text-teal-500 pr-2">{run.repo}</span>
+
       <span className="flex items-center gap-2 min-w-0">
-        <span className="font-mono text-xs font-medium text-teal-500">{run.repo}</span>
         <span className="truncate text-sm text-fg-2">{run.title}</span>
         {lifecycleLabel != null && (
           <span className="rounded-full border border-line px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide text-fg-muted">
@@ -646,6 +648,15 @@ function RunRow({ run }: { run: RunWithStatus }) {
             {run.comments}
           </span>
         )}
+      </span>
+
+      <span className="truncate font-mono text-xs text-fg-3 pr-2">{run.workflow}</span>
+
+      <span
+        className="font-mono text-xs text-fg-muted pr-2"
+        title={run.createdAt}
+      >
+        {run.createdAt != null ? formatRelativeTime(run.createdAt) : ""}
       </span>
 
       <span className="flex items-center justify-end gap-2 pr-4 font-mono text-xs tabular-nums">
@@ -992,7 +1003,7 @@ export default function Runs() {
         ) : (
           <>
             {filteredRuns > 0 && (
-              <div className="grid gap-2" style={{ gridTemplateColumns: "auto 5rem 1fr 8rem auto" }}>
+              <div className="grid gap-2" style={{ gridTemplateColumns: "auto 5rem auto 1fr auto auto 8rem auto" }}>
                 {visibleColumns.flatMap((col) =>
                   col.items.map((item) => (
                     <RunRow key={item.id} run={{ ...item, status: col.id, statusLabel: col.name }} />
