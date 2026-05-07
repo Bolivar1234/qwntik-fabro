@@ -410,14 +410,25 @@ function EventRow({
 function DebugRow({
   event,
   runStart,
+  selected,
+  onSelect,
 }: {
   event: EventEnvelope;
   runStart: string | undefined;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   const eventName = event.event ?? "";
   const category = debugCategory(eventName);
   return (
-    <div className="grid w-full grid-cols-[5rem_1fr_auto] items-center gap-4 px-5 py-1.5 text-left">
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`grid w-full grid-cols-[5rem_1fr_auto] items-center gap-4 px-5 py-2.5 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-500 ${
+        selected ? "bg-overlay" : ""
+      }`}
+    >
       <span
         className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${debugCategoryTone(category)}`}
       >
@@ -429,7 +440,7 @@ function DebugRow({
       <span className="font-mono text-xs tabular-nums text-fg-muted">
         {formatElapsed(event.ts, runStart)}
       </span>
-    </div>
+    </button>
   );
 }
 
@@ -577,36 +588,36 @@ function EventDetails({ turn, runStart }: { turn: TurnType; runStart: string | u
   );
 }
 
-function EventDetailsPanel({
-  turn,
-  runStart,
+function DetailsPanel({
+  title,
+  isOpen,
   onClose,
+  children,
 }: {
-  turn: TurnType | null;
-  runStart: string | undefined;
+  title: string;
+  isOpen: boolean;
   onClose: () => void;
+  children: React.ReactNode;
 }) {
   useEffect(() => {
-    if (!turn) return;
+    if (!isOpen) return;
     function handleKey(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [turn, onClose]);
+  }, [isOpen, onClose]);
 
   return (
     <div
       className={`relative shrink-0 self-stretch overflow-hidden transition-[width] duration-200 ease-out ${
-        turn ? "w-[28rem]" : "w-0"
+        isOpen ? "w-[28rem]" : "w-0"
       }`}
-      aria-hidden={turn ? undefined : true}
+      aria-hidden={isOpen ? undefined : true}
     >
       <div className="absolute inset-y-0 right-0 flex w-[28rem] flex-col border-l border-line bg-panel">
         <div className="flex shrink-0 items-center justify-between border-b border-line px-5 py-3">
-          <h2 className="text-sm font-medium text-fg">
-            {turn ? `${turnLabel(turn)} event` : ""}
-          </h2>
+          <h2 className="text-sm font-medium text-fg">{title}</h2>
           <button
             type="button"
             onClick={onClose}
@@ -617,10 +628,58 @@ function EventDetailsPanel({
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {turn ? <EventDetails turn={turn} runStart={runStart} /> : null}
+          {isOpen ? children : null}
         </div>
       </div>
     </div>
+  );
+}
+
+function EventDetailsPanel({
+  turn,
+  runStart,
+  onClose,
+}: {
+  turn: TurnType | null;
+  runStart: string | undefined;
+  onClose: () => void;
+}) {
+  return (
+    <DetailsPanel
+      title={turn ? `${turnLabel(turn)} event` : ""}
+      isOpen={turn != null}
+      onClose={onClose}
+    >
+      {turn ? <EventDetails turn={turn} runStart={runStart} /> : null}
+    </DetailsPanel>
+  );
+}
+
+function DebugEventDetails({ event }: { event: EventEnvelope }) {
+  const text = useMemo(() => JSON.stringify(event, null, 2), [event]);
+  const tokens = useMemo(() => highlightJson(text), [text]);
+  return (
+    <pre className="whitespace-pre-wrap rounded-md bg-overlay-strong p-3 font-mono text-xs leading-relaxed text-fg-3">
+      {tokens}
+    </pre>
+  );
+}
+
+function DebugEventDetailsPanel({
+  event,
+  onClose,
+}: {
+  event: EventEnvelope | null;
+  onClose: () => void;
+}) {
+  return (
+    <DetailsPanel
+      title={event?.event ?? ""}
+      isOpen={event != null}
+      onClose={onClose}
+    >
+      {event ? <DebugEventDetails event={event} /> : null}
+    </DetailsPanel>
   );
 }
 
@@ -845,8 +904,10 @@ export default function RunStages() {
   );
 
   const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const [openDebugSeq, setOpenDebugSeq] = useState<number | null>(null);
   useEffect(() => {
     setOpenIndex(null);
+    setOpenDebugSeq(null);
   }, [selectedStageId]);
   const openTurn = openIndex != null ? turns[openIndex] ?? null : null;
 
@@ -874,6 +935,13 @@ export default function RunStages() {
       (e) => activityEventStageId(e) === selectedStageId,
     );
   }, [stageEventsQuery.data, selectedStageId]);
+  const openDebugEvent = useMemo<EventEnvelope | null>(
+    () =>
+      openDebugSeq != null
+        ? debugEvents.find((e) => e.seq === openDebugSeq) ?? null
+        : null,
+    [debugEvents, openDebugSeq],
+  );
   const availableDebugCategories = useMemo<string[]>(() => {
     const set = new Set<string>();
     for (const event of debugEvents) {
@@ -970,17 +1038,26 @@ export default function RunStages() {
                 key={`debug-${event.seq}`}
                 event={event}
                 runStart={runStart}
+                selected={openDebugSeq === event.seq}
+                onSelect={() => setOpenDebugSeq(event.seq)}
               />
             ))
           )}
         </div>
       </div>
 
-      <EventDetailsPanel
-        turn={tab === "transcript" ? openTurn : null}
-        runStart={runStart}
-        onClose={() => setOpenIndex(null)}
-      />
+      {tab === "transcript" ? (
+        <EventDetailsPanel
+          turn={openTurn}
+          runStart={runStart}
+          onClose={() => setOpenIndex(null)}
+        />
+      ) : (
+        <DebugEventDetailsPanel
+          event={openDebugEvent}
+          onClose={() => setOpenDebugSeq(null)}
+        />
+      )}
     </div>
   );
 }
