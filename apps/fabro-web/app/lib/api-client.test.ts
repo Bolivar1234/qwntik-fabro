@@ -45,7 +45,12 @@ describe("generated Axios adapter", () => {
 
   test("normalizes generated client failures into ApiError", async () => {
     const body = {
-      errors: [{ status: "500", title: "Internal", request_id: "body-req" }],
+      errors: [{
+        status: "500",
+        title: "Internal",
+        detail: "Database is unavailable.",
+        request_id: "body-req",
+      }],
     };
 
     try {
@@ -64,7 +69,7 @@ describe("generated Axios adapter", () => {
       expect(error).toBeInstanceOf(ApiError);
       expect(error).toMatchObject({
         status: 500,
-        message: "Internal Server Error",
+        message: "Database is unavailable.",
         requestId: "header-req",
         body,
       });

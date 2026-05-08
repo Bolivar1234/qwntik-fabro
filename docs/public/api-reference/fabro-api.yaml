@@ -5177,24 +5177,89 @@ components:
 
     SubmitAnswerRequest:
       description: >
-        Request body for submitting an answer to a pending question.
-        At least one of `value`, `selected_option_key`, or `selected_option_keys` must be provided.
+        Request body for submitting an answer to a pending question. The
+        `kind` discriminator determines which answer shape is submitted.
+      oneOf:
+        - $ref: "#/components/schemas/SubmitAnswerYesRequest"
+        - $ref: "#/components/schemas/SubmitAnswerNoRequest"
+        - $ref: "#/components/schemas/SubmitAnswerSelectedRequest"
+        - $ref: "#/components/schemas/SubmitAnswerMultiSelectedRequest"
+        - $ref: "#/components/schemas/SubmitAnswerTextRequest"
+      discriminator:
+        propertyName: kind
+        mapping:
+          "yes": "#/components/schemas/SubmitAnswerYesRequest"
+          "no": "#/components/schemas/SubmitAnswerNoRequest"
+          selected: "#/components/schemas/SubmitAnswerSelectedRequest"
+          multi_selected: "#/components/schemas/SubmitAnswerMultiSelectedRequest"
+          text: "#/components/schemas/SubmitAnswerTextRequest"
+
+    SubmitAnswerYesRequest:
       type: object
+      required:
+        - kind
       properties:
-        value:
+        kind:
           type: string
-          description: Freeform answer text.
-          example: "Yes, proceed with the changes."
-        selected_option_key:
+          enum: ["yes"]
+          description: Affirmative answer for yes/no and confirmation questions.
+
+    SubmitAnswerNoRequest:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
           type: string
-          description: Key of the selected option (for single-select multiple-choice questions).
+          enum: ["no"]
+          description: Negative answer for yes/no questions.
+
+    SubmitAnswerSelectedRequest:
+      type: object
+      required:
+        - kind
+        - option_key
+      properties:
+        kind:
+          type: string
+          enum: [selected]
+          description: Single selected option answer.
+        option_key:
+          type: string
+          description: Key of the selected option.
           example: option_a
-        selected_option_keys:
+
+    SubmitAnswerMultiSelectedRequest:
+      type: object
+      required:
+        - kind
+        - option_keys
+      properties:
+        kind:
+          type: string
+          enum: [multi_selected]
+          description: Multiple selected option answer.
+        option_keys:
           type: array
           items:
             type: string
-          description: Keys of selected options (for multi-select questions).
+          description: Keys of selected options.
           example: ["option_a", "option_b"]
+
+    SubmitAnswerTextRequest:
+      type: object
+      required:
+        - kind
+        - text
+      properties:
+        kind:
+          type: string
+          enum: [text]
+          description: Freeform text answer.
+        text:
+          type: string
+          description: Freeform answer text.
+          example: "Yes, proceed with the changes."
 
     ErrorResponseEntry:
       description: A single error entry in an error response.

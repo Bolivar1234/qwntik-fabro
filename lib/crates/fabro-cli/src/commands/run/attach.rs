@@ -313,12 +313,30 @@ async fn submit_server_interview_answer(
     qid: &str,
     answer: &fabro_interview::Answer,
 ) -> Result<bool> {
-    let (value, selected_option_key, selected_option_keys) = match &answer.value {
-        AnswerValue::Text(text) => (Some(text.clone()), None, Vec::new()),
-        AnswerValue::Selected(key) => (None, Some(key.clone()), Vec::new()),
-        AnswerValue::MultiSelected(keys) => (None, None, keys.clone()),
-        AnswerValue::Yes => (Some("yes".to_string()), None, Vec::new()),
-        AnswerValue::No => (Some("no".to_string()), None, Vec::new()),
+    let body = match &answer.value {
+        AnswerValue::Text(text) => types::SubmitAnswerTextRequest {
+            kind: types::SubmitAnswerTextRequestKind::Text,
+            text: text.clone(),
+        }
+        .into(),
+        AnswerValue::Selected(key) => types::SubmitAnswerSelectedRequest {
+            kind:       types::SubmitAnswerSelectedRequestKind::Selected,
+            option_key: key.clone(),
+        }
+        .into(),
+        AnswerValue::MultiSelected(keys) => types::SubmitAnswerMultiSelectedRequest {
+            kind:        types::SubmitAnswerMultiSelectedRequestKind::MultiSelected,
+            option_keys: keys.clone(),
+        }
+        .into(),
+        AnswerValue::Yes => types::SubmitAnswerYesRequest {
+            kind: types::SubmitAnswerYesRequestKind::Yes,
+        }
+        .into(),
+        AnswerValue::No => types::SubmitAnswerNoRequest {
+            kind: types::SubmitAnswerNoRequestKind::No,
+        }
+        .into(),
         AnswerValue::Cancelled
         | AnswerValue::Interrupted
         | AnswerValue::Skipped
@@ -326,15 +344,7 @@ async fn submit_server_interview_answer(
             return Ok(false);
         }
     };
-    client
-        .submit_run_answer(
-            run_id,
-            qid,
-            value,
-            selected_option_key,
-            selected_option_keys,
-        )
-        .await?;
+    client.submit_run_answer(run_id, qid, body).await?;
     Ok(true)
 }
 

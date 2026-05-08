@@ -977,7 +977,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
                 .post(format!(
                     "{base_url}/api/v1/runs/{run_id}/questions/{question_id}/answer"
                 ))
-                .json(&serde_json::json!({ "selected_option_key": "A" }))
+                .json(&serde_json::json!({ "kind": "selected", "option_key": "A" }))
                 .send()
                 .await
                 .expect("answer submission should succeed");

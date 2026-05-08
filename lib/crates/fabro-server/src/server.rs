@@ -2590,9 +2590,10 @@ fn validate_answer_for_question(
 ) -> Result<(), Response> {
     match (&question.question_type, &answer.value) {
         (
-            QuestionType::YesNo | QuestionType::Confirmation,
+            QuestionType::YesNo,
             fabro_interview::AnswerValue::Yes | fabro_interview::AnswerValue::No,
         )
+        | (QuestionType::Confirmation, fabro_interview::AnswerValue::Yes)
         | (
             _,
             fabro_interview::AnswerValue::Interrupted
@@ -2692,31 +2693,31 @@ fn answer_from_request(
     req: SubmitAnswerRequest,
     question: &InterviewQuestionRecord,
 ) -> Result<Answer, Response> {
-    if let Some(key) = req.selected_option_key {
-        let option = question
-            .options
-            .iter()
-            .find(|option| option.key == key)
-            .cloned();
-        match option {
-            Some(option) => Ok(Answer::selected(key, option)),
-            None => Err(ApiError::bad_request("Invalid option key.").into_response()),
-        }
-    } else if !req.selected_option_keys.is_empty() {
-        for key in &req.selected_option_keys {
-            let valid = question.options.iter().any(|option| option.key == *key);
-            if !valid {
-                return Err(ApiError::bad_request("Invalid option key.").into_response());
+    match req {
+        SubmitAnswerRequest::YesRequest(_) => Ok(Answer::yes()),
+        SubmitAnswerRequest::NoRequest(_) => Ok(Answer::no()),
+        SubmitAnswerRequest::SelectedRequest(req) => {
+            let key = req.option_key;
+            let option = question
+                .options
+                .iter()
+                .find(|option| option.key == key)
+                .cloned();
+            match option {
+                Some(option) => Ok(Answer::selected(key, option)),
+                None => Err(ApiError::bad_request("Invalid option key.").into_response()),
             }
         }
-        Ok(Answer::multi_selected(req.selected_option_keys))
-    } else if let Some(value) = req.value {
-        Ok(Answer::text(value))
-    } else {
-        Err(ApiError::bad_request(
-            "One of value, selected_option_key, or selected_option_keys is required.",
-        )
-        .into_response())
+        SubmitAnswerRequest::MultiSelectedRequest(req) => {
+            for key in &req.option_keys {
+                let valid = question.options.iter().any(|option| option.key == *key);
+                if !valid {
+                    return Err(ApiError::bad_request("Invalid option key.").into_response());
+                }
+            }
+            Ok(Answer::multi_selected(req.option_keys))
+        }
+        SubmitAnswerRequest::TextRequest(req) => Ok(Answer::text(req.text)),
     }
 }
 

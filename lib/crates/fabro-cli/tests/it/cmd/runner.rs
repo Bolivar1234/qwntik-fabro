@@ -781,7 +781,7 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
             .post(format!(
                 "{base_url}/api/v1/runs/{run_id}/questions/{question_id}/answer"
             ))
-            .json(&serde_json::json!({ "selected_option_key": "A" }))
+            .json(&serde_json::json!({ "kind": "selected", "option_key": "A" }))
             .send()
             .await
             .expect("answer submission should succeed");

@@ -101,7 +101,10 @@ function useLifecycleMutation(
   );
 }
 
-export type SubmitInterviewAnswerArg = SubmitAnswerRequest & { questionId: string };
+export type SubmitInterviewAnswerArg = {
+  questionId: string;
+  answer: SubmitAnswerRequest;
+};
 
 export function useSubmitInterviewAnswer(runId: string | undefined) {
   const { mutate } = useSWRConfig();
@@ -109,8 +112,9 @@ export function useSubmitInterviewAnswer(runId: string | undefined) {
     runId ? `interview-answer:${runId}` : null,
     async (_key: string, { arg }: { arg: SubmitInterviewAnswerArg }) => {
       if (!runId) throw new Error("runId is required");
-      const { questionId, ...body } = arg;
-      await apiData(() => humanInTheLoopApi.submitRunAnswer(runId, questionId, body));
+      await apiData(() =>
+        humanInTheLoopApi.submitRunAnswer(runId, arg.questionId, arg.answer),
+      );
     },
     {
       onSuccess: () => {

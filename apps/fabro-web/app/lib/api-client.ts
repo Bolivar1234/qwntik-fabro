@@ -176,10 +176,21 @@ function apiErrorFromAxios(error: unknown): ApiError | null {
   const requestId = requestIdFromHeaders(response.headers) ?? extractRequestId(response.data);
   return new ApiError({
     status: response.status,
-    message: response.statusText || `HTTP ${response.status}`,
+    message: extractErrorDetail(response.data) ?? (response.statusText || `HTTP ${response.status}`),
     requestId,
     body: response.data ?? null,
   });
+}
+
+function extractErrorDetail(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
+  const errors = (body as Record<string, unknown>).errors;
+  if (!Array.isArray(errors) || errors.length === 0) return null;
+
+  const first = errors[0];
+  if (!first || typeof first !== "object") return null;
+  const detail = (first as Record<string, unknown>).detail;
+  return typeof detail === "string" && detail.length > 0 ? detail : null;
 }
 
 function redirectToLogin(error: ApiError, options: ApiCallOptions) {

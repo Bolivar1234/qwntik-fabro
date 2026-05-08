@@ -3983,7 +3983,7 @@ async fn submit_answer_not_found_run() {
         .uri(api(&format!("/runs/{missing_run_id}/questions/q1/answer")))
         .header("content-type", "application/json")
         .body(Body::from(
-            serde_json::to_string(&serde_json::json!({"value": "yes"})).unwrap(),
+            serde_json::to_string(&serde_json::json!({"kind": "yes"})).unwrap(),
         ))
         .unwrap();
 
@@ -4024,6 +4024,109 @@ async fn submit_pending_interview_answer_rejects_invalid_answer_shape() {
     .unwrap_err();
 
     assert_status!(response, StatusCode::BAD_REQUEST).await;
+}
+
+#[test]
+fn answer_from_typed_yes_request_maps_to_yes_answer() {
+    let question = InterviewQuestionRecord {
+        id:              "q-1".to_string(),
+        text:            "Continue?".to_string(),
+        stage:           "gate".to_string(),
+        question_type:   QuestionType::YesNo,
+        options:         vec![],
+        allow_freeform:  false,
+        timeout_seconds: None,
+        context_display: None,
+    };
+    let req: SubmitAnswerRequest = serde_json::from_value(json!({ "kind": "yes" })).unwrap();
+
+    let answer = answer_from_request(req, &question).unwrap();
+
+    assert_eq!(answer.value, AnswerValue::Yes);
+}
+
+#[test]
+fn answer_from_typed_no_request_maps_to_no_answer() {
+    let question = InterviewQuestionRecord {
+        id:              "q-1".to_string(),
+        text:            "Continue?".to_string(),
+        stage:           "gate".to_string(),
+        question_type:   QuestionType::YesNo,
+        options:         vec![],
+        allow_freeform:  false,
+        timeout_seconds: None,
+        context_display: None,
+    };
+    let req: SubmitAnswerRequest = serde_json::from_value(json!({ "kind": "no" })).unwrap();
+
+    let answer = answer_from_request(req, &question).unwrap();
+
+    assert_eq!(answer.value, AnswerValue::No);
+}
+
+#[test]
+fn answer_from_typed_selected_request_validates_and_attaches_option() {
+    let question = InterviewQuestionRecord {
+        id:              "q-1".to_string(),
+        text:            "Choose one.".to_string(),
+        stage:           "gate".to_string(),
+        question_type:   QuestionType::MultipleChoice,
+        options:         vec![fabro_types::run_event::InterviewOption {
+            key:   "approve".to_string(),
+            label: "Approve".to_string(),
+        }],
+        allow_freeform:  false,
+        timeout_seconds: None,
+        context_display: None,
+    };
+    let req: SubmitAnswerRequest =
+        serde_json::from_value(json!({ "kind": "selected", "option_key": "approve" })).unwrap();
+
+    let answer = answer_from_request(req, &question).unwrap();
+
+    assert_eq!(answer.value, AnswerValue::Selected("approve".to_string()));
+    assert_eq!(
+        answer
+            .selected_option
+            .as_ref()
+            .map(|option| option.label.as_str()),
+        Some("Approve")
+    );
+}
+
+#[test]
+fn answer_from_typed_multi_selected_request_validates_option_keys() {
+    let question = InterviewQuestionRecord {
+        id:              "q-1".to_string(),
+        text:            "Choose many.".to_string(),
+        stage:           "gate".to_string(),
+        question_type:   QuestionType::MultiSelect,
+        options:         vec![
+            fabro_types::run_event::InterviewOption {
+                key:   "approve".to_string(),
+                label: "Approve".to_string(),
+            },
+            fabro_types::run_event::InterviewOption {
+                key:   "notify".to_string(),
+                label: "Notify".to_string(),
+            },
+        ],
+        allow_freeform:  false,
+        timeout_seconds: None,
+        context_display: None,
+    };
+    let req: SubmitAnswerRequest = serde_json::from_value(json!({
+        "kind": "multi_selected",
+        "option_keys": ["approve", "notify"],
+    }))
+    .unwrap();
+
+    let answer = answer_from_request(req, &question).unwrap();
+
+    assert_eq!(
+        answer.value,
+        AnswerValue::MultiSelected(vec!["approve".to_string(), "notify".to_string()])
+    );
 }
 
 #[tokio::test]
@@ -8106,7 +8209,7 @@ async fn submit_answer_to_queued_run_returns_conflict() {
         .uri(api(&format!("/runs/{run_id}/questions/q1/answer")))
         .header("content-type", "application/json")
         .body(Body::from(
-            serde_json::to_string(&serde_json::json!({"value": "yes"})).unwrap(),
+            serde_json::to_string(&serde_json::json!({"kind": "yes"})).unwrap(),
         ))
         .unwrap();
 
