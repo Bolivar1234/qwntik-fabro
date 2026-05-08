@@ -21,7 +21,7 @@ use fabro_config::daemon::ServerDaemon;
 use fabro_config::{Storage, envfile};
 use fabro_store::EventEnvelope;
 use fabro_test::{TestContext, expect_reqwest_status};
-use fabro_types::{CommandOutputStream, RunId, StageId};
+use fabro_types::{RunId, StageId};
 use httpmock::{Mock, MockServer};
 use serde_json::Value;
 use shlex::try_quote;
@@ -704,15 +704,11 @@ pub(crate) fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
     crate::support::parse_event_envelopes(&response)
 }
 
-pub(crate) fn command_log_text(
-    run_dir: &Path,
-    stage_id: &StageId,
-    stream: CommandOutputStream,
-) -> String {
+pub(crate) fn command_log_text(run_dir: &Path, stage_id: &StageId) -> String {
     let run_id = infer_run_id(run_dir);
     let response: CommandLogResponseRecord = block_on(get_server_json(
         run_dir,
-        &format!("/api/v1/runs/{run_id}/stages/{stage_id}/logs/{stream}?offset=0&limit=1048576"),
+        &format!("/api/v1/runs/{run_id}/stages/{stage_id}/logs/output?offset=0&limit=1048576"),
     ));
     let bytes = BASE64_STANDARD
         .decode(&response.bytes_base64)

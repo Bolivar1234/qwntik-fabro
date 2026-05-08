@@ -1877,16 +1877,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/v1/runs/{id}/stages/{stageId}/logs/{stream}:
+  /api/v1/runs/{id}/stages/{stageId}/logs/output:
     get:
       operationId: getRunStageCommandLog
       tags: [Run Internals]
       summary: Tail Command Log
-      description: Returns a byte-offset slice of a command stage stdout or stderr log. Bytes are base64-encoded and are not snapped to UTF-8 boundaries.
+      description: Returns a byte-offset slice of a command stage output log. Bytes are base64-encoded and are not snapped to UTF-8 boundaries.
       parameters:
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/StageId"
-        - $ref: "#/components/parameters/CommandLogStream"
         - $ref: "#/components/parameters/CommandLogOffset"
         - $ref: "#/components/parameters/CommandLogLimit"
       responses:
@@ -1897,7 +1896,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/CommandLogResponse"
         "400":
-          description: Invalid stage, stream, offset, or limit.
+          description: Invalid stage, offset, or limit.
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -3053,15 +3052,6 @@ components:
       schema:
         type: string
       example: code@2
-
-    CommandLogStream:
-      name: stream
-      in: path
-      required: true
-      description: Command output stream to read.
-      schema:
-        $ref: "#/components/schemas/CommandOutputStream"
-      example: stdout
 
     CommandLogOffset:
       name: offset
@@ -5183,13 +5173,6 @@ components:
           description: Blob identifier.
           example: 550e8400-e29b-41d4-a716-446655440000
 
-    CommandOutputStream:
-      description: Command output stream name.
-      type: string
-      enum:
-        - stdout
-        - stderr
-
     CommandTermination:
       description: Terminal state for a command execution.
       type: string
@@ -5202,7 +5185,6 @@ components:
       description: Byte-offset command log slice.
       type: object
       required:
-        - stream
         - offset
         - next_offset
         - total_bytes
@@ -5211,8 +5193,6 @@ components:
         - cas_ref
         - live_streaming
       properties:
-        stream:
-          $ref: "#/components/schemas/CommandOutputStream"
         offset:
           type: integer
           minimum: 0
@@ -5226,7 +5206,7 @@ components:
         total_bytes:
           type: integer
           minimum: 0
-          description: Total bytes currently available for the stream.
+          description: Total bytes currently available for the output log.
           example: 8192
         bytes_base64:
           type: string
@@ -5234,7 +5214,7 @@ components:
           example: aGVsbG8K
         eof:
           type: boolean
-          description: Whether the stream is finalized.
+          description: Whether the output log is finalized.
           example: false
         cas_ref:
           oneOf:
@@ -5440,18 +5420,11 @@ components:
           items:
             type: object
           description: Per-branch result objects produced by a parallel stage.
-        stdout:
+        output:
           type: ["string", "null"]
-        stderr:
-          type: ["string", "null"]
-        stdout_bytes:
+        output_bytes:
           type: ["integer", "null"]
           minimum: 0
-        stderr_bytes:
-          type: ["integer", "null"]
-          minimum: 0
-        streams_separated:
-          type: ["boolean", "null"]
         live_streaming:
           type: ["boolean", "null"]
         termination:

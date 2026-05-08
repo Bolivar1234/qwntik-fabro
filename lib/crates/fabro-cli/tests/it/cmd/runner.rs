@@ -16,7 +16,7 @@ use fabro_store::EventEnvelope;
 use fabro_test::{
     assert_reqwest_status, expect_reqwest_json, fabro_json_snapshot, fabro_snapshot, test_context,
 };
-use fabro_types::{CommandOutputStream, EventBody, FailureReason, RunEvent, StageId};
+use fabro_types::{EventBody, FailureReason, RunEvent, StageId};
 use httpmock::MockServer;
 
 use super::support::{
@@ -505,7 +505,7 @@ methods = ["dev-token"]
     let _probe = state
         .stage(&probe_stage_id)
         .expect("probe node state should exist");
-    let stdout = command_log_text(&run_dir, &probe_stage_id, CommandOutputStream::Stdout);
+    let stdout = command_log_text(&run_dir, &probe_stage_id);
     assert!(
         stdout.contains("probe-ran"),
         "probe stage should have executed, got stdout:\n{stdout}"

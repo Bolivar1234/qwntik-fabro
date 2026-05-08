@@ -52,14 +52,9 @@ pub struct StageProjection {
     pub script_invocation: Option<serde_json::Value>,
     pub script_timing:     Option<serde_json::Value>,
     pub parallel_results:  Option<serde_json::Value>,
-    pub stdout:            Option<String>,
-    pub stderr:            Option<String>,
+    pub output:            Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stdout_bytes:      Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stderr_bytes:      Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub streams_separated: Option<bool>,
+    pub output_bytes:      Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live_streaming:    Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -99,11 +94,8 @@ impl StageProjection {
             script_invocation: None,
             script_timing: None,
             parallel_results: None,
-            stdout: None,
-            stderr: None,
-            stdout_bytes: None,
-            stderr_bytes: None,
-            streams_separated: None,
+            output: None,
+            output_bytes: None,
             live_streaming: None,
             termination: None,
             started_at: None,

@@ -7,7 +7,6 @@ import type {
   PaginatedRunList,
   PaginatedRunStageList,
   CommandLogResponse,
-  CommandOutputStream,
   RunBilling,
   RunProjection,
   ServerSettings,
@@ -153,23 +152,21 @@ export function useRunStageEvents(id: string | undefined, stageId: string | unde
 export function fetchRunCommandLog(
   id: string,
   stageId: string,
-  stream: CommandOutputStream,
   offset: number,
   limit?: number,
 ) {
   return apiFetcher<CommandLogResponse>(
-    queryKeys.runs.stageLog(id, stageId, stream, offset, limit),
+    queryKeys.runs.stageLog(id, stageId, offset, limit),
   );
 }
 
 export function useRunStageLog(
   id: string | undefined,
   stageId: string | undefined,
-  stream: CommandOutputStream,
   enabled: boolean,
 ) {
   return useSWR<CommandLogResponse>(
-    enabled && id && stageId ? queryKeys.runs.stageLog(id, stageId, stream) : null,
+    enabled && id && stageId ? queryKeys.runs.stageLog(id, stageId) : null,
     apiFetcher,
   );
 }

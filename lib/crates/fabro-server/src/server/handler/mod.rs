@@ -44,7 +44,7 @@ pub(super) fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/blobs", post(not_implemented))
         .route("/runs/{id}/blobs/{blobId}", get(not_implemented))
         .route(
-            "/runs/{id}/stages/{stageId}/logs/{stream}",
+            "/runs/{id}/stages/{stageId}/logs/output",
             get(not_implemented),
         )
         .route("/runs/{id}/checkpoint", get(demo::checkpoint_stub))

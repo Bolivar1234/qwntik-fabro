@@ -337,11 +337,6 @@ fn main() {
         ("StageCompletion", "fabro_types::StageCompletion", &[]),
         ("StageOutcome", "fabro_types::StageOutcome", &[]),
         ("StageState", "fabro_types::StageState", &[]),
-        (
-            "CommandOutputStream",
-            "fabro_types::CommandOutputStream",
-            &[],
-        ),
         ("CommandTermination", "fabro_types::CommandTermination", &[]),
         ("StageProjection", "fabro_types::StageProjection", &[]),
         ("SecretMetadata", "fabro_types::SecretMetadata", &[]),

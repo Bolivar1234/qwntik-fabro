@@ -386,11 +386,8 @@ impl RunProjectionReducer for RunProjection {
                 let Some(stage) = stage_at_stored_or_current_visit(self, stored, event.seq) else {
                     return Ok(());
                 };
-                stage.stdout = Some(props.stdout.clone());
-                stage.stderr = Some(props.stderr.clone());
-                stage.stdout_bytes = Some(props.stdout_bytes);
-                stage.stderr_bytes = Some(props.stderr_bytes);
-                stage.streams_separated = Some(props.streams_separated);
+                stage.output = Some(props.output.clone());
+                stage.output_bytes = Some(props.output_bytes);
                 stage.live_streaming = Some(props.live_streaming);
                 stage.termination = Some(props.termination);
                 stage.script_timing = Some(script_timing);
@@ -402,8 +399,7 @@ impl RunProjectionReducer for RunProjection {
                 apply_agent_cli_terminal(
                     stage,
                     props,
-                    &props.stdout,
-                    &props.stderr,
+                    merge_agent_cli_output(&props.stdout, &props.stderr),
                     CommandTermination::Exited,
                 )?;
             }
@@ -414,8 +410,7 @@ impl RunProjectionReducer for RunProjection {
                 apply_agent_cli_terminal(
                     stage,
                     props,
-                    &props.stdout,
-                    &props.stderr,
+                    merge_agent_cli_output(&props.stdout, &props.stderr),
                     CommandTermination::Cancelled,
                 )?;
             }
@@ -426,8 +421,7 @@ impl RunProjectionReducer for RunProjection {
                 apply_agent_cli_terminal(
                     stage,
                     props,
-                    &props.stdout,
-                    &props.stderr,
+                    merge_agent_cli_output(&props.stdout, &props.stderr),
                     CommandTermination::TimedOut,
                 )?;
             }
@@ -718,17 +712,24 @@ fn provider_used_from_agent_cli_started(props: &AgentCliStartedProps) -> Value {
 fn apply_agent_cli_terminal(
     stage: &mut StageProjection,
     props: &impl serde::Serialize,
-    stdout: &str,
-    stderr: &str,
+    output: String,
     termination: CommandTermination,
 ) -> Result<()> {
     let script_timing = serde_json::to_value(props)
         .map_err(|err| Error::InvalidEvent(format!("invalid agent.cli terminal payload: {err}")))?;
-    stage.stdout = Some(stdout.to_string());
-    stage.stderr = Some(stderr.to_string());
+    stage.output = Some(output);
     stage.termination = Some(termination);
     stage.script_timing = Some(script_timing);
     Ok(())
+}
+
+fn merge_agent_cli_output(stdout: &str, stderr: &str) -> String {
+    match (stdout.is_empty(), stderr.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => stdout.to_string(),
+        (true, false) => stderr.to_string(),
+        (false, false) => format!("{stdout}\n{stderr}"),
+    }
 }
 
 #[cfg(test)]
@@ -911,7 +912,7 @@ mod tests {
                 "build@2": {
                     "first_event_seq": 1,
                     "diff": "diff --git a/file b/file",
-                    "stdout": "done"
+                    "output": "done"
                 }
             }
         }))
@@ -928,7 +929,7 @@ mod tests {
             serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
         let serialized = serde_json::to_value(&state).unwrap();
         let round_tripped_node = round_tripped.stage(&stage_id).unwrap();
-        assert_eq!(round_tripped_node.stdout.as_deref(), Some("done"));
+        assert_eq!(round_tripped_node.output.as_deref(), Some("done"));
         assert_eq!(round_tripped.list_node_visits("build"), vec![2]);
         assert_eq!(
             round_tripped.pending_control,
@@ -955,7 +956,7 @@ mod tests {
             restart_failure_signatures: HashMap::new(),
             node_visits:                HashMap::from([("build".to_string(), 2usize)]),
         })];
-        state.stage_entry("build", 2, first_event_seq(7)).stdout = Some("done".to_string());
+        state.stage_entry("build", 2, first_event_seq(7)).output = Some("done".to_string());
 
         let round_tripped: RunProjection =
             serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
@@ -964,7 +965,7 @@ mod tests {
             round_tripped
                 .stage(&StageId::new("build", 2))
                 .unwrap()
-                .stdout
+                .output
                 .as_deref(),
             Some("done")
         );
@@ -1127,8 +1128,7 @@ mod tests {
             .unwrap();
 
         let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(stage.stdout.as_deref(), Some("done"));
-        assert_eq!(stage.stderr.as_deref(), Some("warn"));
+        assert_eq!(stage.output.as_deref(), Some("done\nwarn"));
         assert_eq!(stage.termination, Some(CommandTermination::Exited));
         assert_eq!(
             stage.script_timing.as_ref().unwrap()["duration_ms"],
@@ -1155,8 +1155,7 @@ mod tests {
             .unwrap();
 
         let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(stage.stdout.as_deref(), Some("partial"));
-        assert_eq!(stage.stderr.as_deref(), Some("cancelled"));
+        assert_eq!(stage.output.as_deref(), Some("partial\ncancelled"));
         assert_eq!(stage.termination, Some(CommandTermination::Cancelled));
         assert_eq!(
             stage.script_timing.as_ref().unwrap()["duration_ms"],
@@ -1183,8 +1182,7 @@ mod tests {
             .unwrap();
 
         let stage = state.stage(&stage_id).unwrap();
-        assert_eq!(stage.stdout.as_deref(), Some("partial"));
-        assert_eq!(stage.stderr.as_deref(), Some("timeout"));
+        assert_eq!(stage.output.as_deref(), Some("partial\ntimeout"));
         assert_eq!(stage.termination, Some(CommandTermination::TimedOut));
         assert_eq!(
             stage.script_timing.as_ref().unwrap()["duration_ms"],

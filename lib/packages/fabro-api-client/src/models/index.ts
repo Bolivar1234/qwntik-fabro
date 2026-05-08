@@ -22,7 +22,6 @@ export * from './check-run-status';
 export * from './close-run-pull-request-response';
 export * from './code-location';
 export * from './command-log-response';
-export * from './command-output-stream';
 export * from './command-termination';
 export * from './completion-content-part';
 export * from './completion-message';

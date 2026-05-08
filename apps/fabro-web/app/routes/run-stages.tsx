@@ -33,7 +33,7 @@ import {
 import { STAGE_ACTIVITY_EVENT_TYPES, type StageActivityEventType } from "../lib/run-events";
 import { mapRunStagesToSidebarStages } from "../lib/stage-sidebar";
 import { getNumber, getString, type UnknownRecord } from "../lib/unknown";
-import type { CommandOutputStream, EventEnvelope } from "@qltysh/fabro-api-client";
+import type { EventEnvelope } from "@qltysh/fabro-api-client";
 
 export const handle = { wide: true, fullHeight: true };
 
@@ -48,8 +48,7 @@ type TurnType =
       running: boolean;
       exitCode: number | null;
       durationMs: number;
-      stdoutBytes: number;
-      stderrBytes: number;
+      outputBytes: number;
     };
 
 type CommandTurn = Extract<TurnType, { kind: "command" }>;
@@ -199,8 +198,7 @@ export function eventsToActivity(events: EventEnvelope[], stageId: string): Turn
           running: false,
           exitCode: getNumber(props, "exit_code") ?? null,
           durationMs: getNumber(props, "duration_ms") ?? 0,
-          stdoutBytes: getNumber(props, "stdout_bytes") ?? 0,
-          stderrBytes: getNumber(props, "stderr_bytes") ?? 0,
+          outputBytes: getNumber(props, "output_bytes") ?? 0,
         });
         pendingCommand = undefined;
         break;
@@ -218,8 +216,7 @@ export function eventsToActivity(events: EventEnvelope[], stageId: string): Turn
       running: true,
       exitCode: null,
       durationMs: 0,
-      stdoutBytes: 0,
-      stderrBytes: 0,
+      outputBytes: 0,
     });
   }
 
@@ -763,21 +760,17 @@ function decodeBase64Utf8(b64: string): string {
 function LogStream({
   runId,
   stageId,
-  stream,
   label,
   byteCount,
   enabled,
-  tone,
 }: {
   runId: string;
   stageId: string;
-  stream: CommandOutputStream;
   label: string;
   byteCount: number;
   enabled: boolean;
-  tone?: "stderr";
 }) {
-  const { data, error, isLoading } = useRunStageLog(runId, stageId, stream, enabled && byteCount > 0);
+  const { data, error, isLoading } = useRunStageLog(runId, stageId, enabled && byteCount > 0);
   const text = useMemo(() => {
     if (!data?.bytes_base64) return "";
     try {
@@ -802,16 +795,14 @@ function LogStream({
         )}
       </header>
       <pre
-        className={`overflow-x-auto whitespace-pre-wrap rounded-md bg-overlay-strong p-3 font-mono text-xs leading-relaxed ${
-          tone === "stderr" ? "text-coral" : "text-fg-3"
-        }`}
+        className="overflow-x-auto whitespace-pre-wrap rounded-md bg-overlay-strong p-3 font-mono text-xs leading-relaxed text-fg-3"
       >
         {byteCount === 0 ? (
           <span className="text-fg-muted">empty</span>
         ) : isLoading && !data ? (
           <span className="text-fg-muted">loading…</span>
         ) : error ? (
-          <span className="text-coral">Failed to load {stream}.</span>
+          <span className="text-coral">Failed to load output.</span>
         ) : (
           text || <span className="text-fg-muted">empty</span>
         )}
@@ -886,19 +877,9 @@ function CommandLogs({
       <LogStream
         runId={runId}
         stageId={stageId}
-        stream="stdout"
-        label="Stdout"
-        byteCount={turn.stdoutBytes}
+        label="Output"
+        byteCount={turn.outputBytes}
         enabled={!turn.running}
-      />
-      <LogStream
-        runId={runId}
-        stageId={stageId}
-        stream="stderr"
-        label="Stderr"
-        byteCount={turn.stderrBytes}
-        enabled={!turn.running}
-        tone="stderr"
       />
     </div>
   );

@@ -519,17 +519,14 @@ pub enum Event {
         timeout_ms: Option<u64>,
     },
     CommandCompleted {
-        node_id:           String,
-        stdout:            String,
-        stderr:            String,
+        node_id:        String,
+        output:         String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        exit_code:         Option<i32>,
-        duration_ms:       u64,
-        termination:       CommandTermination,
-        stdout_bytes:      u64,
-        stderr_bytes:      u64,
-        streams_separated: bool,
-        live_streaming:    bool,
+        exit_code:      Option<i32>,
+        duration_ms:    u64,
+        termination:    CommandTermination,
+        output_bytes:   u64,
+        live_streaming: bool,
     },
     AgentCliStarted {
         node_id:  String,
@@ -1304,8 +1301,7 @@ impl Event {
                 exit_code,
                 duration_ms,
                 termination,
-                stdout_bytes,
-                stderr_bytes,
+                output_bytes,
                 ..
             } => {
                 debug!(
@@ -1313,8 +1309,7 @@ impl Event {
                     exit_code,
                     duration_ms,
                     termination = %termination,
-                    stdout_bytes,
-                    stderr_bytes,
+                    output_bytes,
                     "Command completed"
                 );
             }

@@ -24,7 +24,7 @@ You have access to the run's data files:
 - `graph.fabro` — the workflow source for the run
 - `checkpoints/{seq:04}.json` — zero-padded checkpoint snapshots captured during the run
 - `run.log` — server/worker log output for the run when available
-- `stages/{rank:03}-{node_id}@{visit}/...` — execution-order-prefixed per-stage prompt, response, status, diff, stdout/stderr, and tool metadata files
+- `stages/{rank:03}-{node_id}@{visit}/...` — execution-order-prefixed per-stage prompt, response, status, diff, output, and tool metadata files
 
 ## Your task
 
@@ -430,8 +430,7 @@ mod tests {
         stage.script_invocation = Some(serde_json::json!({ "command": "cargo test" }));
         stage.script_timing = Some(serde_json::json!({ "duration_ms": 10 }));
         stage.parallel_results = Some(serde_json::json!([{ "stage": "fanout@1" }]));
-        stage.stdout = Some("stdout".to_string());
-        stage.stderr = Some("stderr".to_string());
+        stage.output = Some("output".to_string());
 
         upload_data_files(
             &sandbox,
@@ -473,10 +472,10 @@ mod tests {
             "done"
         );
         assert_eq!(
-            fs::read_to_string(target_dir.join("stages/001-build@2/stdout.log"))
+            fs::read_to_string(target_dir.join("stages/001-build@2/output.log"))
                 .await
-                .expect("stdout file should exist"),
-            "stdout"
+                .expect("output file should exist"),
+            "output"
         );
         assert_eq!(
             fs::read_to_string(target_dir.join("events.jsonl"))
@@ -501,7 +500,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn upload_data_files_resolves_command_stdout_stderr_blob_refs() {
+    async fn upload_data_files_resolves_command_output_blob_refs() {
         let sandbox_root = tempfile::tempdir().expect("sandbox tempdir should exist");
         let sandbox: Arc<dyn Sandbox> =
             Arc::new(LocalSandbox::new(sandbox_root.path().to_path_buf()));
@@ -509,37 +508,28 @@ mod tests {
         let target_dir = output_dir.path().join("retro");
         let target_dir_str = target_dir.to_string_lossy().to_string();
 
-        let stdout_blob = serde_json::to_vec("resolved stdout").unwrap();
-        let stderr_blob = serde_json::to_vec("resolved stderr").unwrap();
-        let stdout_id = fabro_types::RunBlobId::new(&stdout_blob);
-        let stderr_id = fabro_types::RunBlobId::new(&stderr_blob);
+        let output_blob = serde_json::to_vec("resolved output").unwrap();
+        let output_id = fabro_types::RunBlobId::new(&output_blob);
 
         let stage_id = StageId::new("build", 1);
         let mut state = RunProjection::default();
-        let stdout_ref = fabro_types::format_blob_ref(&stdout_id);
-        let stderr_ref = fabro_types::format_blob_ref(&stderr_id);
+        let output_ref = fabro_types::format_blob_ref(&output_id);
         let stage = state.stage_entry(stage_id.node_id(), stage_id.visit(), first_event_seq(1));
         stage.script_invocation = Some(serde_json::json!({
             "command": "cargo test",
-            "stdout": stdout_ref,
-            "stderr": stderr_ref,
+            "output": output_ref,
         }));
         stage.script_timing = Some(serde_json::json!({
             "exit_code": 0,
-            "stdout": stdout_ref,
-            "stderr": stderr_ref,
+            "output": output_ref,
         }));
-        stage.stdout = Some(stdout_ref);
-        stage.stderr = Some(stderr_ref);
+        stage.output = Some(output_ref);
 
         let reader: BlobReader = Box::new(move |blob_id| {
-            let stdout_blob = stdout_blob.clone();
-            let stderr_blob = stderr_blob.clone();
+            let output_blob = output_blob.clone();
             Box::pin(async move {
-                if blob_id == stdout_id {
-                    Ok(Some(stdout_blob.into()))
-                } else if blob_id == stderr_id {
-                    Ok(Some(stderr_blob.into()))
+                if blob_id == output_id {
+                    Ok(Some(output_blob.into()))
                 } else {
                     Ok(None)
                 }
@@ -551,16 +541,10 @@ mod tests {
             .expect("retro files should upload");
 
         assert_eq!(
-            fs::read_to_string(target_dir.join("stages/001-build@1/stdout.log"))
+            fs::read_to_string(target_dir.join("stages/001-build@1/output.log"))
                 .await
-                .expect("stdout file should exist"),
-            "resolved stdout"
-        );
-        assert_eq!(
-            fs::read_to_string(target_dir.join("stages/001-build@1/stderr.log"))
-                .await
-                .expect("stderr file should exist"),
-            "resolved stderr"
+                .expect("output file should exist"),
+            "resolved output"
         );
 
         let script_timing: serde_json::Value = serde_json::from_str(
@@ -569,8 +553,7 @@ mod tests {
                 .expect("script timing should exist"),
         )
         .expect("script timing should parse");
-        assert_eq!(script_timing["stdout"], "resolved stdout");
-        assert_eq!(script_timing["stderr"], "resolved stderr");
+        assert_eq!(script_timing["output"], "resolved output");
 
         let script_invocation: serde_json::Value = serde_json::from_str(
             &fs::read_to_string(target_dir.join("stages/001-build@1/script_invocation.json"))
@@ -578,8 +561,7 @@ mod tests {
                 .expect("script invocation should exist"),
         )
         .expect("script invocation should parse");
-        assert_eq!(script_invocation["stdout"], "resolved stdout");
-        assert_eq!(script_invocation["stderr"], "resolved stderr");
+        assert_eq!(script_invocation["output"], "resolved output");
 
         let run_json: serde_json::Value = serde_json::from_str(
             &fs::read_to_string(target_dir.join("run.json"))
@@ -588,18 +570,13 @@ mod tests {
         )
         .expect("run.json should parse");
         assert_eq!(
-            run_json["stages"]["build@1"]["script_timing"]["stdout"],
-            "resolved stdout"
+            run_json["stages"]["build@1"]["script_timing"]["output"],
+            "resolved output"
         );
         assert_eq!(
-            run_json["stages"]["build@1"]["script_timing"]["stderr"],
-            "resolved stderr"
+            run_json["stages"]["build@1"]["script_invocation"]["output"],
+            "resolved output"
         );
-        assert_eq!(
-            run_json["stages"]["build@1"]["script_invocation"]["stdout"],
-            "resolved stdout"
-        );
-        assert!(run_json["stages"]["build@1"]["stdout"].is_null());
-        assert!(run_json["stages"]["build@1"]["stderr"].is_null());
+        assert!(run_json["stages"]["build@1"]["output"].is_null());
     }
 }

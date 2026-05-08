@@ -71,8 +71,6 @@ use fabro_store::{
 };
 #[cfg(test)]
 use fabro_types::BlockedReason;
-#[cfg(test)]
-use fabro_types::CommandOutputStream;
 use fabro_types::settings::run::RunMode;
 use fabro_types::settings::server::{
     GithubIntegrationSettings, GithubIntegrationStrategy, LogDestination,

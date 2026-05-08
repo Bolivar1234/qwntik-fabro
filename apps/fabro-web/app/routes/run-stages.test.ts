@@ -84,10 +84,8 @@ describe("eventsToActivity", () => {
         event: "command.completed",
         node_id: "fmt",
         properties: {
-          stdout: "blob://sha256/abc",
-          stderr: "blob://sha256/def",
-          stdout_bytes: 42,
-          stderr_bytes: 0,
+          output: "blob://sha256/abc",
+          output_bytes: 42,
           exit_code: 0,
           duration_ms: 12,
           termination: "exited",
@@ -101,8 +99,7 @@ describe("eventsToActivity", () => {
       kind: "command",
       script: "cargo fmt",
       running: false,
-      stdoutBytes: 42,
-      stderrBytes: 0,
+      outputBytes: 42,
     });
   });
 
@@ -119,8 +116,7 @@ describe("eventsToActivity", () => {
         stage_id: "verify@2",
         node_id: "verify",
         properties: {
-          stdout: "hi",
-          stderr: "",
+          output: "hi",
           exit_code: 0,
           duration_ms: 5,
           termination: "exited",
@@ -425,8 +421,7 @@ describe("turnsToStageKind", () => {
         event: "command.completed",
         node_id: "fmt",
         properties: {
-          stdout: "blob://sha256/abc",
-          stderr: "blob://sha256/def",
+          output: "blob://sha256/abc",
           exit_code: 0,
           duration_ms: 5,
           termination: "exited",

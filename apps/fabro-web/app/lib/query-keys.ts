@@ -52,15 +52,9 @@ export const queryKeys = {
         since_seq: sinceSeq,
         limit,
       }),
-    stageLog: (
-      id: string,
-      stageId: string,
-      stream: "stdout" | "stderr",
-      offset = 0,
-      limit = 65_536,
-    ) =>
+    stageLog: (id: string, stageId: string, offset = 0, limit = 65_536) =>
       withQuery(
-        `/api/v1/runs/${pathSegment(id)}/stages/${pathSegment(stageId)}/logs/${stream}`,
+        `/api/v1/runs/${pathSegment(id)}/stages/${pathSegment(stageId)}/logs/output`,
         { offset, limit },
       ),
     preview: (id: string) => `/api/v1/runs/${pathSegment(id)}/preview`,

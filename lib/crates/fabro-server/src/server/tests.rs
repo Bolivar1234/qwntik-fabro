@@ -4173,7 +4173,7 @@ async fn get_run_stage_command_log_returns_scratch_slice() {
         .run_scratch(&run_id)
         .root()
         .to_path_buf();
-    let log_path = command_log_path(&run_dir, &stage_id, CommandOutputStream::Stdout);
+    let log_path = command_log_path(&run_dir, &stage_id);
     tokio::fs::create_dir_all(log_path.parent().unwrap())
         .await
         .unwrap();
@@ -4182,7 +4182,7 @@ async fn get_run_stage_command_log_returns_scratch_slice() {
     let req = Request::builder()
         .method("GET")
         .uri(api(&format!(
-            "/runs/{run_id}/stages/{stage_id}/logs/stdout?offset=6&limit=5"
+            "/runs/{run_id}/stages/{stage_id}/logs/output?offset=6&limit=5"
         )))
         .body(Body::empty())
         .unwrap();
@@ -4193,7 +4193,7 @@ async fn get_run_stage_command_log_returns_scratch_slice() {
         .decode(body["bytes_base64"].as_str().unwrap())
         .unwrap();
 
-    assert_eq!(body["stream"], "stdout");
+    assert!(body.get("stream").is_none());
     assert_eq!(body["offset"], 6);
     assert_eq!(body["next_offset"], 11);
     assert_eq!(body["total_bytes"], 11);
@@ -4209,16 +4209,11 @@ async fn get_run_stage_command_log_returns_cas_slice() {
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = RunId::new();
     let run_store = state.store.create_run(&run_id).await.unwrap();
-    let stdout_blob = run_store
+    let output_blob = run_store
         .write_blob(&serde_json::to_vec("hello world").unwrap())
         .await
         .unwrap();
-    let stderr_blob = run_store
-        .write_blob(&serde_json::to_vec("").unwrap())
-        .await
-        .unwrap();
-    let stdout_ref = format!("blob://sha256/{stdout_blob}");
-    let stderr_ref = format!("blob://sha256/{stderr_blob}");
+    let output_ref = format!("blob://sha256/{output_blob}");
     for event in [
         workflow_event::Event::RunSubmitted {
             definition_blob: None,
@@ -4232,16 +4227,13 @@ async fn get_run_stage_command_log_returns_cas_slice() {
             max_attempts: 1,
         },
         workflow_event::Event::CommandCompleted {
-            node_id:           "script_node".to_string(),
-            stdout:            stdout_ref.clone(),
-            stderr:            stderr_ref,
-            exit_code:         Some(0),
-            duration_ms:       5,
-            termination:       CommandTermination::Exited,
-            stdout_bytes:      11,
-            stderr_bytes:      0,
-            streams_separated: true,
-            live_streaming:    false,
+            node_id:        "script_node".to_string(),
+            output:         output_ref.clone(),
+            exit_code:      Some(0),
+            duration_ms:    5,
+            termination:    CommandTermination::Exited,
+            output_bytes:   11,
+            live_streaming: false,
         },
     ] {
         workflow_event::append_event(&run_store, &run_id, &event)
@@ -4252,7 +4244,7 @@ async fn get_run_stage_command_log_returns_cas_slice() {
     let req = Request::builder()
         .method("GET")
         .uri(api(&format!(
-            "/runs/{run_id}/stages/script_node@1/logs/stdout?offset=6&limit=5"
+            "/runs/{run_id}/stages/script_node@1/logs/output?offset=6&limit=5"
         )))
         .body(Body::empty())
         .unwrap();
@@ -4263,13 +4255,13 @@ async fn get_run_stage_command_log_returns_cas_slice() {
         .decode(body["bytes_base64"].as_str().unwrap())
         .unwrap();
 
-    assert_eq!(body["stream"], "stdout");
+    assert!(body.get("stream").is_none());
     assert_eq!(body["offset"], 6);
     assert_eq!(body["next_offset"], 11);
     assert_eq!(body["total_bytes"], 11);
     assert_eq!(bytes, b"world");
     assert_eq!(body["eof"], true);
-    assert_eq!(body["cas_ref"], stdout_ref);
+    assert_eq!(body["cas_ref"], output_ref);
     assert_eq!(body["live_streaming"], false);
 }
 
@@ -4280,16 +4272,11 @@ async fn get_run_stage_command_log_prefers_scratch_when_cas_ref_exists() {
     let run_id = RunId::new();
     let stage_id = StageId::new("script_node", 1);
     let run_store = state.store.create_run(&run_id).await.unwrap();
-    let stdout_blob = run_store
+    let output_blob = run_store
         .write_blob(&serde_json::to_vec("cas log").unwrap())
         .await
         .unwrap();
-    let stderr_blob = run_store
-        .write_blob(&serde_json::to_vec("").unwrap())
-        .await
-        .unwrap();
-    let stdout_ref = format!("blob://sha256/{stdout_blob}");
-    let stderr_ref = format!("blob://sha256/{stderr_blob}");
+    let output_ref = format!("blob://sha256/{output_blob}");
     for event in [
         workflow_event::Event::RunSubmitted {
             definition_blob: None,
@@ -4303,16 +4290,13 @@ async fn get_run_stage_command_log_prefers_scratch_when_cas_ref_exists() {
             max_attempts: 1,
         },
         workflow_event::Event::CommandCompleted {
-            node_id:           "script_node".to_string(),
-            stdout:            stdout_ref.clone(),
-            stderr:            stderr_ref,
-            exit_code:         Some(0),
-            duration_ms:       5,
-            termination:       CommandTermination::Exited,
-            stdout_bytes:      7,
-            stderr_bytes:      0,
-            streams_separated: true,
-            live_streaming:    false,
+            node_id:        "script_node".to_string(),
+            output:         output_ref.clone(),
+            exit_code:      Some(0),
+            duration_ms:    5,
+            termination:    CommandTermination::Exited,
+            output_bytes:   7,
+            live_streaming: false,
         },
     ] {
         workflow_event::append_event(&run_store, &run_id, &event)
@@ -4324,7 +4308,7 @@ async fn get_run_stage_command_log_prefers_scratch_when_cas_ref_exists() {
         .run_scratch(&run_id)
         .root()
         .to_path_buf();
-    let log_path = command_log_path(&run_dir, &stage_id, CommandOutputStream::Stdout);
+    let log_path = command_log_path(&run_dir, &stage_id);
     tokio::fs::create_dir_all(log_path.parent().unwrap())
         .await
         .unwrap();
@@ -4333,7 +4317,7 @@ async fn get_run_stage_command_log_prefers_scratch_when_cas_ref_exists() {
     let req = Request::builder()
         .method("GET")
         .uri(api(&format!(
-            "/runs/{run_id}/stages/{stage_id}/logs/stdout?offset=0&limit=64"
+            "/runs/{run_id}/stages/{stage_id}/logs/output?offset=0&limit=64"
         )))
         .body(Body::empty())
         .unwrap();
@@ -4344,13 +4328,13 @@ async fn get_run_stage_command_log_prefers_scratch_when_cas_ref_exists() {
         .decode(body["bytes_base64"].as_str().unwrap())
         .unwrap();
 
-    assert_eq!(body["stream"], "stdout");
+    assert!(body.get("stream").is_none());
     assert_eq!(body["offset"], 0);
     assert_eq!(body["next_offset"], 11);
     assert_eq!(body["total_bytes"], 11);
     assert_eq!(bytes, b"scratch log");
     assert_eq!(body["eof"], true);
-    assert_eq!(body["cas_ref"], stdout_ref);
+    assert_eq!(body["cas_ref"], output_ref);
     assert_eq!(body["live_streaming"], false);
 }
 
@@ -4366,7 +4350,7 @@ async fn get_run_stage_command_log_returns_not_found_for_missing_stage() {
 
     let req = Request::builder()
         .method("GET")
-        .uri(api(&format!("/runs/{run_id}/stages/missing@1/logs/stdout")))
+        .uri(api(&format!("/runs/{run_id}/stages/missing@1/logs/output")))
         .body(Body::empty())
         .unwrap();
 
@@ -6004,7 +5988,7 @@ async fn worker_token_controls_command_log_route() {
         .clone()
         .oneshot(bearer_request(
             Method::GET,
-            &format!("/runs/{run_id}/stages/code@1/logs/stdout"),
+            &format!("/runs/{run_id}/stages/code@1/logs/output"),
             &worker_token,
             Body::empty(),
         ))
@@ -6016,7 +6000,7 @@ async fn worker_token_controls_command_log_route() {
         .clone()
         .oneshot(bearer_request(
             Method::GET,
-            &format!("/runs/{run_id}/stages/code@1/logs/stdout"),
+            &format!("/runs/{run_id}/stages/code@1/logs/output"),
             &user_jwt,
             Body::empty(),
         ))
@@ -6028,7 +6012,7 @@ async fn worker_token_controls_command_log_route() {
         .clone()
         .oneshot(bearer_request(
             Method::GET,
-            &format!("/runs/{run_id}/stages/code@1/logs/stdout"),
+            &format!("/runs/{run_id}/stages/code@1/logs/output"),
             &mismatched_worker_token,
             Body::empty(),
         ))
@@ -6040,7 +6024,7 @@ async fn worker_token_controls_command_log_route() {
         .oneshot(
             Request::builder()
                 .method(Method::GET)
-                .uri(api(&format!("/runs/{run_id}/stages/code@1/logs/stdout")))
+                .uri(api(&format!("/runs/{run_id}/stages/code@1/logs/output")))
                 .body(Body::empty())
                 .unwrap(),
         )
