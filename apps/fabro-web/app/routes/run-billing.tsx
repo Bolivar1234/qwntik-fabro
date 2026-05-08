@@ -41,6 +41,8 @@ function liveRuntimeSecs(stage: RunBillingStage, now: number): number {
   return stage.runtime_secs;
 }
 
+export const handle = { wide: true };
+
 function mapStageRow(stage: RunBillingStage, runtimeSecs: number): MappedStageRow {
   const hasModel = stage.model != null;
   return {
@@ -121,7 +123,7 @@ export default function RunBilling({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <div className="overflow-hidden rounded-md border border-line">
         <table className="w-full text-sm">
           <thead>
