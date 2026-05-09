@@ -150,8 +150,13 @@ export function FileTreeSidebar({
     );
   }, [changedPaths, model, selectedPath, selection]);
 
-  const themeStyles = useMemo(
-    () => themeToTreeStyles(pierreDark) as TreeThemeStyle,
+  const themeStyles = useMemo<TreeThemeStyle>(
+    () => ({
+      ...(themeToTreeStyles(pierreDark) as TreeThemeStyle),
+      backgroundColor:                   "transparent",
+      "--trees-bg-override":             "transparent",
+      "--trees-padding-inline-override": "0px",
+    }),
     [],
   );
 
