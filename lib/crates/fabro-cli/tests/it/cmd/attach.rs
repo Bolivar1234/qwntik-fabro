@@ -915,7 +915,6 @@ fn attach_json_errors_without_prompting_for_human_input() {
           "settings": {
             "project": {
               "description": null,
-              "directory": ".",
               "metadata": {},
               "name": null
             },
