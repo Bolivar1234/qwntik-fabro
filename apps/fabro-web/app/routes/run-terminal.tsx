@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import TerminalView from "../components/terminal-view";
+import { ToastProvider } from "../components/toast";
 
 export default function RunTerminal({ params }: { params: { id: string } }) {
   useEffect(() => {
@@ -12,8 +13,10 @@ export default function RunTerminal({ params }: { params: { id: string } }) {
   }, [params.id]);
 
   return (
-    <div className="h-screen w-screen overflow-hidden">
-      <TerminalView runId={params.id} chromeless />
-    </div>
+    <ToastProvider>
+      <div className="h-screen w-screen overflow-hidden">
+        <TerminalView runId={params.id} chromeless />
+      </div>
+    </ToastProvider>
   );
 }
