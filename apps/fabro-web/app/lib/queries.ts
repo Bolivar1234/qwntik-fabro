@@ -15,6 +15,7 @@ import type {
   RunBilling,
   RunProjection,
   RunSummary,
+  SandboxDetails,
   ServerSettings,
   SystemInfoResponse,
   WorkflowDetailResponse,
@@ -185,6 +186,13 @@ export function useRunBilling(id: string | undefined) {
   return useSWR<RunBilling>(
     id ? queryKeys.runs.billing(id) : null,
     () => apiData(() => runOutputsApi.retrieveRunBilling(id!)),
+  );
+}
+
+export function useRunSandboxDetails(id: string | undefined) {
+  return useSWR<SandboxDetails | null>(
+    id ? queryKeys.runs.sandbox(id) : null,
+    () => apiNullableData(() => humanInTheLoopApi.retrieveRunSandbox(id!)),
   );
 }
 

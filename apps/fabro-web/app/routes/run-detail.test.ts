@@ -393,6 +393,59 @@ describe("RunDetail full-height child routes", () => {
     expect(terminalLinks).toHaveLength(1);
   });
 
+  test("shows the Sandbox tab when the run has a sandbox", async () => {
+    currentRunState = { sandbox: { provider: "docker", id: "container-1" } };
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1",
+    });
+
+    const sandboxLinks = renderer.root.findAll(
+      (node) =>
+        node.type === "a" &&
+        node.props.href === "/runs/run_1/sandbox" &&
+        node.children.includes("Sandbox"),
+    );
+    expect(sandboxLinks).toHaveLength(1);
+  });
+
+  test("hides the Sandbox tab when the run has no sandbox", async () => {
+    currentRunState = {};
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1",
+    });
+
+    const sandboxLinks = renderer.root.findAll(
+      (node) =>
+        node.type === "a" &&
+        node.props.href === "/runs/run_1/sandbox",
+    );
+    expect(sandboxLinks).toHaveLength(0);
+  });
+
+  test("places the Sandbox tab immediately before Terminal", async () => {
+    currentRunState = { sandbox: { provider: "docker", id: "container-1" } };
+    const renderer = await renderRunDetail({
+      initialEntry: "/runs/run_1",
+    });
+
+    const tabLabels = renderer.root
+      .findAll(
+        (node) =>
+          node.type === "a" &&
+          typeof node.props.href === "string" &&
+          node.props.href.startsWith("/runs/run_1"),
+      )
+      .map((node) =>
+        node.children.find((child) => typeof child === "string"),
+      )
+      .filter((label): label is string => typeof label === "string");
+
+    const sandboxIndex = tabLabels.indexOf("Sandbox");
+    const terminalIndex = tabLabels.indexOf("Terminal");
+    expect(sandboxIndex).toBeGreaterThanOrEqual(0);
+    expect(terminalIndex).toBeGreaterThan(sandboxIndex);
+  });
+
   test("defers steer bar focus until after the Actions menu item click settles", async () => {
     const focusCalls: string[] = [];
 

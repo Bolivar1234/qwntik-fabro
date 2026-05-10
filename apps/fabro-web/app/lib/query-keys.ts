@@ -64,6 +64,7 @@ export const queryKeys = {
       ["runs", "stage-events", id, stageId] as const,
     stageLog: (id: string, stageId: string, offset = 0, limit = 65_536) =>
       ["runs", "stage-log", id, stageId, offset, limit] as const,
+    sandbox: (id: string) => ["runs", "sandbox", id] as const,
     preview: (id: string) => ["runs", "preview", id] as const,
     cancel: (id: string) => ["runs", "cancel", id] as const,
     archive: (id: string) => ["runs", "archive", id] as const,

@@ -21,6 +21,7 @@ import * as RunLogs from "./routes/run-logs";
 import * as RunEvents from "./routes/run-events";
 import * as RunArtifacts from "./routes/run-artifacts";
 import * as RunFiles from "./routes/run-files";
+import * as RunSandbox from "./routes/run-sandbox";
 import * as RunTerminal from "./routes/run-terminal";
 import * as RunBilling from "./routes/run-billing";
 import * as Insights from "./routes/insights";
@@ -101,6 +102,7 @@ export const routes: RouteObject[] = [
               route("events", RunEvents),
               route("artifacts", RunArtifacts),
               route("files", RunFiles),
+              route("sandbox", RunSandbox),
               route("terminal", RunTerminal),
               route("billing", RunBilling),
             ],

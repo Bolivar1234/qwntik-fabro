@@ -62,6 +62,7 @@ const allTabs = [
   { name: "Overview", path: "", count: null, demoOnly: false },
   { name: "Stages", path: "/stages", count: null, demoOnly: false },
   { name: "Files Changed", path: "/files", count: null, demoOnly: false },
+  { name: "Sandbox", path: "/sandbox", count: null, demoOnly: false, requiresSandbox: true },
   { name: "Terminal", path: "/terminal", count: null, demoOnly: false, requiresSandbox: true },
   { name: "Billing", path: "/billing", count: null, demoOnly: false },
 ];

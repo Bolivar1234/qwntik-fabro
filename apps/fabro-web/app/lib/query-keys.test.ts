@@ -43,6 +43,7 @@ describe("queryKeys", () => {
       "run 1",
       "build step",
     ]);
+    expect(queryKeys.runs.sandbox("run 1")).toEqual(["runs", "sandbox", "run 1"]);
     expect(queryKeys.system.attachUrl()).toBe("/api/v1/attach");
     expect(queryKeys.runs.attachUrl("run 1")).toBe("/api/v1/runs/run%201/attach");
   });

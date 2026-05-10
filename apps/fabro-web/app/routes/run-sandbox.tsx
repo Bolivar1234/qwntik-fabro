@@ -1,0 +1,214 @@
+import { EmptyState, ErrorState } from "../components/state";
+import { formatAbsoluteTs } from "../lib/format";
+import { useRunSandboxDetails } from "../lib/queries";
+import type { SandboxDetails, SandboxResources, SandboxState } from "@qltysh/fabro-api-client";
+
+const EMPTY_VALUE = "—";
+
+const STATE_DISPLAY: Record<SandboxState, { label: string; dot: string; text: string }> = {
+  unknown: { label: "Unknown", dot: "bg-fg-muted", text: "text-fg-muted" },
+  provisioning: { label: "Provisioning", dot: "bg-amber", text: "text-amber" },
+  starting: { label: "Starting", dot: "bg-amber", text: "text-amber" },
+  running: { label: "Running", dot: "bg-teal-500", text: "text-teal-500" },
+  stopping: { label: "Stopping", dot: "bg-amber", text: "text-amber" },
+  stopped: { label: "Stopped", dot: "bg-fg-muted", text: "text-fg-muted" },
+  paused: { label: "Paused", dot: "bg-amber", text: "text-amber" },
+  deleting: { label: "Deleting", dot: "bg-amber", text: "text-amber" },
+  deleted: { label: "Deleted", dot: "bg-coral", text: "text-coral" },
+  archived: { label: "Archived", dot: "bg-fg-muted", text: "text-fg-muted" },
+  restoring: { label: "Restoring", dot: "bg-amber", text: "text-amber" },
+  resizing: { label: "Resizing", dot: "bg-amber", text: "text-amber" },
+  error: { label: "Error", dot: "bg-coral", text: "text-coral" },
+};
+
+const BYTES_PER_GIB = 1024 * 1024 * 1024;
+const BYTES_PER_MIB = 1024 * 1024;
+
+export function formatBytesAsMemory(bytes: number): string {
+  if (bytes >= BYTES_PER_GIB) {
+    const gib = bytes / BYTES_PER_GIB;
+    return `${Number.isInteger(gib) ? gib : gib.toFixed(1)} GiB`;
+  }
+  if (bytes >= BYTES_PER_MIB) {
+    const mib = bytes / BYTES_PER_MIB;
+    return `${Number.isInteger(mib) ? mib : mib.toFixed(1)} MiB`;
+  }
+  return `${bytes} B`;
+}
+
+function formatCpuCores(cores: number): string {
+  return Number.isInteger(cores) ? cores.toString() : cores.toFixed(2);
+}
+
+function nullable(value: string | null | undefined): string {
+  return value && value.length > 0 ? value : EMPTY_VALUE;
+}
+
+function nullableTimestamp(value: string | null | undefined): string {
+  return value ? formatAbsoluteTs(value) : EMPTY_VALUE;
+}
+
+function nullableMemory(bytes: number | null | undefined): string {
+  return bytes != null ? formatBytesAsMemory(bytes) : EMPTY_VALUE;
+}
+
+function nullableCpu(cores: number | null | undefined): string {
+  return cores != null ? formatCpuCores(cores) : EMPTY_VALUE;
+}
+
+interface RowProps {
+  label: string;
+  value: string;
+  valueClassName?: string;
+}
+
+function Row({ label, value, valueClassName }: RowProps) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
+      <span className="text-fg-3">{label}</span>
+      <span
+        className={`text-right font-mono text-xs text-fg-2 ${
+          valueClassName ?? ""
+        } ${value === EMPTY_VALUE ? "text-fg-muted" : ""}`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+interface PanelProps {
+  title: string;
+  children: React.ReactNode;
+}
+
+function Panel({ title, children }: PanelProps) {
+  return (
+    <div className="overflow-hidden rounded-md border border-line">
+      <h3 className="border-b border-line bg-panel/60 px-4 py-2.5 text-xs font-medium text-fg-3">
+        {title}
+      </h3>
+      <div className="divide-y divide-line">{children}</div>
+    </div>
+  );
+}
+
+function StatusStrip({ details }: { details: SandboxDetails }) {
+  const display = STATE_DISPLAY[details.state] ?? STATE_DISPLAY.unknown;
+  const showNative =
+    details.native_state &&
+    details.native_state.toLowerCase() !== details.state.toLowerCase();
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-md border border-line bg-panel/60 px-4 py-3 text-sm">
+      <span className="font-mono text-xs text-fg-muted uppercase tracking-wide">
+        {details.provider}
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className={`size-2 rounded-full ${display.dot}`} />
+        <span className={`font-medium ${display.text}`}>{display.label}</span>
+      </span>
+      {showNative && (
+        <span className="font-mono text-xs text-fg-muted">
+          native: {details.native_state}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function OverviewPanel({ details }: { details: SandboxDetails }) {
+  return (
+    <Panel title="Overview">
+      <Row label="Name" value={nullable(details.name)} />
+      <Row label="ID" value={nullable(details.id)} />
+      <Row
+        label="Region"
+        value={details.region ? details.region : details.provider === "docker" ? "local" : EMPTY_VALUE}
+      />
+      <Row label="Image" value={nullable(details.image)} />
+    </Panel>
+  );
+}
+
+function ResourcesPanel({ resources }: { resources: SandboxResources }) {
+  return (
+    <Panel title="Resources">
+      <Row label="CPU" value={nullableCpu(resources.cpu_cores)} />
+      <Row label="Memory" value={nullableMemory(resources.memory_bytes)} />
+      <Row label="Disk" value={nullableMemory(resources.disk_bytes)} />
+    </Panel>
+  );
+}
+
+function LabelsPanel({ labels }: { labels: { [key: string]: string } | null | undefined }) {
+  const entries = labels ? Object.entries(labels) : [];
+  return (
+    <Panel title="Labels">
+      {entries.length === 0 ? (
+        <div className="px-4 py-3 text-sm text-fg-muted">No labels</div>
+      ) : (
+        entries
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, value]) => <Row key={key} label={key} value={value} />)
+      )}
+    </Panel>
+  );
+}
+
+function TimestampsPanel({ details }: { details: SandboxDetails }) {
+  return (
+    <Panel title="Timestamps">
+      <Row label="Created" value={nullableTimestamp(details.timestamps.created_at)} />
+      <Row
+        label="Last activity"
+        value={nullableTimestamp(details.timestamps.last_activity_at)}
+      />
+    </Panel>
+  );
+}
+
+export default function RunSandbox({ params }: { params: { id: string } }) {
+  const sandboxQuery = useRunSandboxDetails(params.id);
+
+  if (sandboxQuery.error) {
+    return (
+      <div className="py-12">
+        <ErrorState
+          title="Sandbox unavailable"
+          description={
+            sandboxQuery.error instanceof Error
+              ? sandboxQuery.error.message
+              : "Could not load sandbox details."
+          }
+        />
+      </div>
+    );
+  }
+
+  if (sandboxQuery.isLoading && !sandboxQuery.data) {
+    return <div className="py-12" />;
+  }
+
+  if (!sandboxQuery.data) {
+    return (
+      <div className="py-12">
+        <EmptyState
+          title="No sandbox"
+          description="This run has no sandbox or its provider does not expose details."
+        />
+      </div>
+    );
+  }
+
+  const details = sandboxQuery.data;
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-4">
+      <StatusStrip details={details} />
+      <OverviewPanel details={details} />
+      <ResourcesPanel resources={details.resources} />
+      <LabelsPanel labels={details.labels} />
+      <TimestampsPanel details={details} />
+    </div>
+  );
+}
