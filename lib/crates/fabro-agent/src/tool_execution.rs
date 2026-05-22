@@ -126,12 +126,18 @@ async fn execute_tool_calls_parallel(
             let session_id = session_id.to_owned();
             let tool_hooks = tool_hooks.cloned();
             let tool_env_provider = tool_env_provider.clone();
+            let access_denial = config.tool_access_denial_reason(&tc.name);
             // Look up the tool before spawning since ToolRegistry is not Send.
-            let registered_tool = registry.get(&tc.name).cloned();
+            let registered_tool = if access_denial.is_none() {
+                registry.get(&tc.name).cloned()
+            } else {
+                None
+            };
             async move {
                 execute_and_emit_one_tool_with_lookup(
                     &tc,
                     registered_tool.as_ref(),
+                    access_denial,
                     env,
                     tool_hooks.as_ref(),
                     cancel_token.child_token(),
@@ -164,9 +170,16 @@ pub async fn execute_and_emit_one_tool(
     session_id: &str,
     tool_env_provider: Option<&Arc<dyn ToolEnvProvider>>,
 ) -> ToolResult {
+    let access_denial = config.tool_access_denial_reason(&tc.name);
+    let registered_tool = if access_denial.is_none() {
+        registry.get(&tc.name)
+    } else {
+        None
+    };
     execute_and_emit_one_tool_with_lookup(
         tc,
-        registry.get(&tc.name),
+        registered_tool,
+        access_denial,
         env,
         tool_hooks,
         cancel_token,
@@ -187,6 +200,7 @@ pub async fn execute_and_emit_one_tool(
 async fn execute_and_emit_one_tool_with_lookup(
     tc: &ToolCall,
     registered_tool: Option<&RegisteredTool>,
+    access_denial: Option<String>,
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: CancellationToken,
@@ -200,6 +214,22 @@ async fn execute_and_emit_one_tool_with_lookup(
         tool_call_id: tc.id.clone(),
         arguments:    tc.arguments.clone(),
     });
+
+    if let Some(reason) = access_denial {
+        let result = ToolResult::error(&tc.id, &reason);
+
+        emitter.emit(session_id.to_owned(), AgentEvent::ToolCallOutputDelta {
+            delta: result.content.to_string(),
+        });
+        emitter.emit(session_id.to_owned(), AgentEvent::ToolCallCompleted {
+            tool_name:    tc.name.clone(),
+            tool_call_id: tc.id.clone(),
+            output:       result.content.clone(),
+            is_error:     true,
+        });
+
+        return truncate_tool_result(&result, &tc.name, config);
+    }
 
     // Pre-tool-use hook
     if let Some(hooks) = tool_hooks {
@@ -355,7 +385,9 @@ mod tests {
     use fabro_llm::types::{ToolCall, ToolDefinition};
 
     use super::*;
-    use crate::config::{ToolHookCallback, ToolHookDecision};
+    use crate::config::{
+        ToolAccess, ToolAccessPolicy, ToolExposureMode, ToolHookCallback, ToolHookDecision,
+    };
     use crate::event::Emitter;
     use crate::local_sandbox::LocalSandbox;
     use crate::read_before_write_sandbox::ReadBeforeWriteSandbox;
@@ -364,6 +396,30 @@ mod tests {
     use crate::tools::{
         make_edit_file_tool, make_grep_tool, make_read_file_tool, make_write_file_tool,
     };
+
+    struct NamedPolicy {
+        decisions: HashMap<String, ToolAccess>,
+    }
+
+    impl NamedPolicy {
+        fn new(decisions: impl IntoIterator<Item = (&'static str, ToolAccess)>) -> Self {
+            Self {
+                decisions: decisions
+                    .into_iter()
+                    .map(|(name, access)| (name.to_string(), access))
+                    .collect(),
+            }
+        }
+    }
+
+    impl ToolAccessPolicy for NamedPolicy {
+        fn access_for_tool(&self, tool_name: &str) -> ToolAccess {
+            self.decisions
+                .get(tool_name)
+                .copied()
+                .unwrap_or(ToolAccess::Denied)
+        }
+    }
 
     fn make_echo_tool() -> RegisteredTool {
         RegisteredTool {
@@ -615,6 +671,112 @@ mod tests {
         assert!(!result.is_error);
         let content = result.content.to_string();
         assert!(content.contains("echo: hello"));
+    }
+
+    #[tokio::test]
+    async fn denied_policy_tool_is_blocked_before_executor_lookup() {
+        let executions = Arc::new(Mutex::new(0usize));
+        let mut registry = ToolRegistry::new();
+        let executions_for_tool = Arc::clone(&executions);
+        registry.register(RegisteredTool {
+            definition: ToolDefinition {
+                name:        "write_file".to_string(),
+                description: "Writes a file".to_string(),
+                parameters:  serde_json::json!({"type": "object"}),
+            },
+            executor:   Arc::new(move |_args: serde_json::Value, _ctx: ToolContext| {
+                let executions = Arc::clone(&executions_for_tool);
+                Box::pin(async move {
+                    *executions.lock().unwrap() += 1;
+                    Ok("wrote".to_string())
+                })
+            }),
+        });
+        let config = SessionOptions {
+            tool_access_policy: Some(Arc::new(NamedPolicy::new([(
+                "write_file",
+                ToolAccess::Denied,
+            )]))),
+            tool_exposure_mode: ToolExposureMode::IncludeRequiresApproval,
+            ..SessionOptions::default()
+        };
+
+        let tc = make_tool_call("write_file", "call_1", serde_json::json!({}));
+        let result = execute_and_emit_one_tool(
+            &tc,
+            &registry,
+            make_sandbox(),
+            None,
+            CancellationToken::new(),
+            &config,
+            &Emitter::new(),
+            "test-session",
+            None,
+        )
+        .await;
+
+        assert!(result.is_error);
+        assert!(
+            result
+                .content
+                .as_str()
+                .unwrap_or_default()
+                .contains("denied by tool access policy")
+        );
+        assert_eq!(*executions.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn approval_required_tool_hidden_by_exposure_mode_is_blocked() {
+        let executions = Arc::new(Mutex::new(0usize));
+        let mut registry = ToolRegistry::new();
+        let executions_for_tool = Arc::clone(&executions);
+        registry.register(RegisteredTool {
+            definition: ToolDefinition {
+                name:        "shell".to_string(),
+                description: "Runs a command".to_string(),
+                parameters:  serde_json::json!({"type": "object"}),
+            },
+            executor:   Arc::new(move |_args: serde_json::Value, _ctx: ToolContext| {
+                let executions = Arc::clone(&executions_for_tool);
+                Box::pin(async move {
+                    *executions.lock().unwrap() += 1;
+                    Ok("ran".to_string())
+                })
+            }),
+        });
+        let config = SessionOptions {
+            tool_access_policy: Some(Arc::new(NamedPolicy::new([(
+                "shell",
+                ToolAccess::RequiresApproval,
+            )]))),
+            tool_exposure_mode: ToolExposureMode::AutoApprovedOnly,
+            ..SessionOptions::default()
+        };
+
+        let tc = make_tool_call("shell", "call_1", serde_json::json!({}));
+        let result = execute_and_emit_one_tool(
+            &tc,
+            &registry,
+            make_sandbox(),
+            None,
+            CancellationToken::new(),
+            &config,
+            &Emitter::new(),
+            "test-session",
+            None,
+        )
+        .await;
+
+        assert!(result.is_error);
+        assert!(
+            result
+                .content
+                .as_str()
+                .unwrap_or_default()
+                .contains("requires approval")
+        );
+        assert_eq!(*executions.lock().unwrap(), 0);
     }
 
     // --- ReadBeforeWriteSandbox e2e tests ---

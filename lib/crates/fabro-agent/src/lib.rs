@@ -28,7 +28,10 @@ pub mod truncation;
 pub mod types;
 
 pub use agent_profile::AgentProfile;
-pub use config::{SessionOptions, ToolApprovalAdapter, ToolHookCallback, ToolHookDecision};
+pub use config::{
+    SessionOptions, ToolAccess, ToolAccessPolicy, ToolApprovalAdapter, ToolExposureMode,
+    ToolHookCallback, ToolHookDecision,
+};
 #[cfg(feature = "docker")]
 pub use docker_sandbox::{DockerSandbox, DockerSandboxOptions};
 pub use error::{Error, InterruptReason, Result};

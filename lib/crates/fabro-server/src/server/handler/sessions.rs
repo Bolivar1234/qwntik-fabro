@@ -9,16 +9,18 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use fabro_agent::config::ToolApprovalFn;
-use fabro_agent::tool_permissions::is_tool_auto_approved;
+use fabro_agent::config::{ToolAccess, ToolAccessPolicy, ToolExposureMode};
+use fabro_agent::profiles::assemble_system_prompt;
+use fabro_agent::tool_registry::ToolRegistry;
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, Error as AgentError, GeminiProfile, OpenAiProfile,
-    Session, SessionEvent, SessionOptions, ToolApprovalAdapter, WebFetchSummarizer,
+    Session, SessionEvent, SessionOptions, WebFetchSummarizer,
 };
 use fabro_api::types::{
     CreateRunSessionRequest, PaginatedEventList, PaginationMeta, SubmitTurnRequest,
 };
 use fabro_llm::client::Client as LlmClient;
+use fabro_llm::types::ToolDefinition;
 use fabro_model::{AgentProfileKind, Catalog, ModelHandle, ProviderId};
 use fabro_sandbox::reconnect::reconnect_for_run;
 use fabro_store::{
@@ -32,9 +34,7 @@ use fabro_types::run_event::{
     RunSessionTurnSucceededProps, RunSessionUserMessageProps,
 };
 use fabro_types::settings::{ModelRef as SettingsModelRef, ModelRegistry, ResolvedModelRef};
-use fabro_types::{
-    EventBody, EventEnvelope, PermissionLevel, RunEvent, RunId, SessionDetail, SessionId, TurnId,
-};
+use fabro_types::{EventBody, EventEnvelope, RunEvent, RunId, SessionDetail, SessionId, TurnId};
 use fabro_workflow::handler::llm::api::register_named_fabro_run_tools;
 use fabro_workflow::services::FabroRunToolServices;
 use serde_json::Value;
@@ -721,12 +721,13 @@ async fn build_agent_session(
         fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
         fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
     ]);
-    let profile: Arc<dyn AgentProfile> = Arc::from(profile);
+    let ask_fabro_policy = build_ask_fabro_tool_access_policy();
+    let profile: Arc<dyn AgentProfile> =
+        Arc::new(AskFabroProfile::new(profile, Arc::clone(&ask_fabro_policy)));
 
     let config = SessionOptions {
-        tool_hooks: Some(Arc::new(ToolApprovalAdapter(
-            build_ask_fabro_tool_approval(),
-        ))),
+        tool_access_policy: Some(ask_fabro_policy),
+        tool_exposure_mode: ToolExposureMode::AutoApprovedOnly,
         ..SessionOptions::default()
     };
 
@@ -897,28 +898,132 @@ fn summarizer_model_id(
     }
 }
 
-/// Tool approval policy for Ask Fabro agent sessions.
-///
-/// File and shell tools stay locked down to the `ReadOnly` permission level,
-/// matching the rest of the session sandbox. The two run-control tools
-/// (`fabro_run_interact`, `fabro_run_events`) get full access — they're
-/// scoped by the same-run worker token, so the agent cannot reach across
-/// runs even though `interact` exposes mutating actions (start, cancel,
-/// steer, archive, answer).
-fn build_ask_fabro_tool_approval() -> ToolApprovalFn {
-    Arc::new(move |tool_name: &str, _args: &Value| {
-        if matches!(
-            tool_name,
-            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME | fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME
-        ) {
-            return Ok(());
+struct AskFabroToolAccessPolicy;
+
+impl ToolAccessPolicy for AskFabroToolAccessPolicy {
+    fn access_for_tool(&self, tool_name: &str) -> ToolAccess {
+        match tool_name {
+            "read_file"
+            | "grep"
+            | "glob"
+            | fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME
+            | fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME => ToolAccess::Allowed,
+            _ => ToolAccess::Denied,
         }
-        if is_tool_auto_approved(PermissionLevel::ReadOnly, tool_name) {
-            Ok(())
-        } else {
-            Err(format!("{tool_name} tool denied by Ask Fabro tool policy"))
-        }
-    })
+    }
+}
+
+fn build_ask_fabro_tool_access_policy() -> Arc<dyn ToolAccessPolicy> {
+    Arc::new(AskFabroToolAccessPolicy)
+}
+
+fn ask_fabro_effective_tool_definitions(
+    registry: &ToolRegistry,
+    policy: &dyn ToolAccessPolicy,
+) -> Vec<ToolDefinition> {
+    registry.definitions_for_policy(Some(policy), ToolExposureMode::AutoApprovedOnly)
+}
+
+fn render_ask_fabro_tool_guidance(
+    registry: &ToolRegistry,
+    policy: &dyn ToolAccessPolicy,
+) -> String {
+    let mut definitions = ask_fabro_effective_tool_definitions(registry, policy);
+    definitions.sort_by(|left, right| left.name.cmp(&right.name));
+
+    definitions
+        .into_iter()
+        .map(|tool| format!("- `{}`: {}", tool.name, tool.description))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn build_ask_fabro_system_prompt(
+    env: &dyn fabro_agent::Sandbox,
+    env_context: &fabro_agent::EnvContext,
+    _memory: &[String],
+    user_instructions: Option<&str>,
+    _skills: &[fabro_agent::Skill],
+    registry: &ToolRegistry,
+    policy: &dyn ToolAccessPolicy,
+) -> String {
+    let tool_guidance = render_ask_fabro_tool_guidance(registry, policy);
+    let core_prompt = format!(
+        "\
+You are Ask Fabro, a read-only, run-scoped assistant for inspecting this Fabro run and its workspace.
+Use the run event history and workspace files to answer questions about this run. Stay within the current run scope.
+
+{{env_block}}
+
+# Tool Access
+
+You can only call these tools:
+{tool_guidance}
+
+Do not claim access to tools that are not listed. Treat tool failures as real failures, not as permission discovery. If the available tools are insufficient, say what cannot be inspected."
+    );
+
+    assemble_system_prompt(&core_prompt, env, env_context, &[], user_instructions, &[])
+}
+
+struct AskFabroProfile {
+    inner:  Box<dyn AgentProfile>,
+    policy: Arc<dyn ToolAccessPolicy>,
+}
+
+impl AskFabroProfile {
+    fn new(inner: Box<dyn AgentProfile>, policy: Arc<dyn ToolAccessPolicy>) -> Self {
+        Self { inner, policy }
+    }
+}
+
+impl AgentProfile for AskFabroProfile {
+    fn profile_kind(&self) -> AgentProfileKind {
+        self.inner.profile_kind()
+    }
+
+    fn provider_id(&self) -> ProviderId {
+        self.inner.provider_id()
+    }
+
+    fn model(&self) -> &str {
+        self.inner.model()
+    }
+
+    fn catalog(&self) -> Option<&Catalog> {
+        self.inner.catalog()
+    }
+
+    fn tool_registry(&self) -> &ToolRegistry {
+        self.inner.tool_registry()
+    }
+
+    fn tool_registry_mut(&mut self) -> &mut ToolRegistry {
+        self.inner.tool_registry_mut()
+    }
+
+    fn build_system_prompt(
+        &self,
+        env: &dyn fabro_agent::Sandbox,
+        env_context: &fabro_agent::EnvContext,
+        memory: &[String],
+        user_instructions: Option<&str>,
+        skills: &[fabro_agent::Skill],
+    ) -> String {
+        build_ask_fabro_system_prompt(
+            env,
+            env_context,
+            memory,
+            user_instructions,
+            skills,
+            self.tool_registry(),
+            self.policy.as_ref(),
+        )
+    }
+
+    fn tools(&self) -> Vec<ToolDefinition> {
+        ask_fabro_effective_tool_definitions(self.tool_registry(), self.policy.as_ref())
+    }
 }
 
 async fn drive_agent_session(
@@ -1031,7 +1136,6 @@ fn agent_event_payload(event_turn_id: TurnId, event: AgentEvent) -> Option<Event
                 delta,
             },
         )),
-        AgentEvent::ReasoningDelta { .. } => None,
         AgentEvent::ToolCallStarted {
             tool_name,
             tool_call_id,
@@ -1251,7 +1355,46 @@ fn parse_turn_id(value: &str) -> Result<TurnId, ApiError> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use fabro_agent::config::ToolAccess;
+    use fabro_agent::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
+    use fabro_llm::types::{ToolCall, ToolDefinition};
+
     use super::*;
+
+    fn stub_tool(name: &str) -> RegisteredTool {
+        RegisteredTool {
+            definition: ToolDefinition {
+                name:        name.to_string(),
+                description: format!("{name} test tool"),
+                parameters:  serde_json::json!({"type": "object"}),
+            },
+            executor:   Arc::new(|_args, _ctx: ToolContext| {
+                Box::pin(async { Ok("ok".to_string()) })
+            }),
+        }
+    }
+
+    fn ask_fabro_test_registry() -> ToolRegistry {
+        let mut registry = ToolRegistry::new();
+        for name in [
+            "read_file",
+            "grep",
+            "glob",
+            "write_file",
+            "edit_file",
+            "shell",
+            "web_search",
+            "web_fetch",
+            fabro_tool::FABRO_RUN_CREATE_TOOL_NAME,
+            fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
+            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+        ] {
+            registry.register(stub_tool(name));
+        }
+        registry
+    }
 
     #[test]
     fn agent_event_payload_maps_text_delta_to_session_assistant_delta() {
@@ -1280,41 +1423,155 @@ mod tests {
     }
 
     #[test]
-    fn ask_fabro_tool_approval_allows_run_interact_and_run_events() {
-        let policy = build_ask_fabro_tool_approval();
-        assert!(policy("fabro_run_interact", &Value::Null).is_ok());
-        assert!(policy("fabro_run_events", &Value::Null).is_ok());
+    fn ask_fabro_tool_policy_allows_only_expected_tools() {
+        let policy = build_ask_fabro_tool_access_policy();
+        for tool_name in [
+            "read_file",
+            "grep",
+            "glob",
+            fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
+            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+        ] {
+            assert_eq!(policy.access_for_tool(tool_name), ToolAccess::Allowed);
+        }
+
+        for tool_name in [
+            "write_file",
+            "edit_file",
+            "shell",
+            "web_search",
+            "web_fetch",
+            fabro_tool::FABRO_RUN_CREATE_TOOL_NAME,
+        ] {
+            assert_eq!(policy.access_for_tool(tool_name), ToolAccess::Denied);
+        }
     }
 
     #[test]
-    fn ask_fabro_tool_approval_allows_read_only_tools() {
-        let policy = build_ask_fabro_tool_approval();
-        // read_file is part of the ReadOnly auto-approved set.
-        assert!(policy("read_file", &Value::Null).is_ok());
+    fn ask_fabro_effective_tools_are_limited_to_policy_allow_list() {
+        let registry = ask_fabro_test_registry();
+        let policy = build_ask_fabro_tool_access_policy();
+
+        let mut names: Vec<_> = ask_fabro_effective_tool_definitions(&registry, policy.as_ref())
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect();
+        names.sort();
+
+        assert_eq!(names, vec![
+            "fabro_run_events",
+            "fabro_run_interact",
+            "glob",
+            "grep",
+            "read_file",
+        ]);
     }
 
     #[test]
-    fn ask_fabro_tool_approval_denies_write_and_shell_tools() {
-        let policy = build_ask_fabro_tool_approval();
-        let write = policy("write_file", &Value::Null).unwrap_err();
-        assert!(
-            write.contains("denied"),
-            "write_file should be denied; got: {write}"
+    fn ask_fabro_prompt_lists_effective_tools_without_denied_tools() {
+        let registry = ask_fabro_test_registry();
+        let policy = build_ask_fabro_tool_access_policy();
+
+        let prompt = build_ask_fabro_system_prompt(
+            &fabro_agent::LocalSandbox::new(std::env::current_dir().unwrap()),
+            &fabro_agent::EnvContext::default(),
+            &[],
+            None,
+            &[],
+            &registry,
+            policy.as_ref(),
         );
 
-        let shell = policy("shell", &Value::Null).unwrap_err();
-        assert!(
-            shell.contains("denied"),
-            "shell should be denied; got: {shell}"
-        );
+        for tool_name in [
+            "read_file",
+            "grep",
+            "glob",
+            fabro_tool::FABRO_RUN_EVENTS_TOOL_NAME,
+            fabro_tool::FABRO_RUN_INTERACT_TOOL_NAME,
+        ] {
+            assert!(
+                prompt.contains(&format!("`{tool_name}`")),
+                "prompt should list {tool_name}"
+            );
+        }
+
+        for hidden_tool in [
+            "write_file",
+            "edit_file",
+            "shell",
+            "web_search",
+            "web_fetch",
+            fabro_tool::FABRO_RUN_CREATE_TOOL_NAME,
+        ] {
+            assert!(
+                !prompt.contains(hidden_tool),
+                "prompt should not mention hidden tool {hidden_tool}"
+            );
+        }
+        assert!(prompt.contains("read-only"));
+        assert!(prompt.contains("run-scoped"));
     }
 
-    #[test]
-    fn ask_fabro_tool_approval_denies_other_mutating_run_tools() {
-        let policy = build_ask_fabro_tool_approval();
-        // Only `fabro_run_interact` and `fabro_run_events` are allow-listed.
-        // `fabro_run_create` and friends are not part of the Ask Fabro subset.
-        let err = policy("fabro_run_create", &Value::Null).unwrap_err();
-        assert!(err.contains("denied"), "fabro_run_create should be denied");
+    #[tokio::test]
+    async fn ask_fabro_blocks_denied_tools_at_execution_time() {
+        let denied_tools = [
+            "write_file",
+            "edit_file",
+            "shell",
+            "web_search",
+            "web_fetch",
+        ];
+        let executions = Arc::new(AtomicUsize::new(0));
+        let mut registry = ToolRegistry::new();
+        for tool_name in denied_tools {
+            let executions = Arc::clone(&executions);
+            registry.register(RegisteredTool {
+                definition: ToolDefinition {
+                    name:        tool_name.to_string(),
+                    description: format!("{tool_name} test tool"),
+                    parameters:  serde_json::json!({"type": "object"}),
+                },
+                executor:   Arc::new(move |_args, _ctx: ToolContext| {
+                    let executions = Arc::clone(&executions);
+                    Box::pin(async move {
+                        executions.fetch_add(1, Ordering::SeqCst);
+                        Ok("executed".to_string())
+                    })
+                }),
+            });
+        }
+        let config = SessionOptions {
+            tool_access_policy: Some(build_ask_fabro_tool_access_policy()),
+            tool_exposure_mode: ToolExposureMode::AutoApprovedOnly,
+            ..SessionOptions::default()
+        };
+        let sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::new(fabro_agent::LocalSandbox::new(
+            std::env::current_dir().unwrap(),
+        ));
+
+        for tool_name in denied_tools {
+            let result = fabro_agent::tool_execution::execute_and_emit_one_tool(
+                &ToolCall::new("call_1", tool_name, serde_json::json!({})),
+                &registry,
+                Arc::clone(&sandbox),
+                None,
+                tokio_util::sync::CancellationToken::new(),
+                &config,
+                &fabro_agent::Emitter::new(),
+                "test-session",
+                None,
+            )
+            .await;
+
+            assert!(result.is_error, "{tool_name} should be blocked");
+            assert!(
+                result
+                    .content
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("denied by tool access policy")
+            );
+        }
+        assert_eq!(executions.load(Ordering::SeqCst), 0);
     }
 }

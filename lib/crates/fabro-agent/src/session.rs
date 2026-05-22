@@ -1609,7 +1609,13 @@ impl Session {
         }
         messages.extend(self.history.convert_to_messages());
 
-        let tools = self.provider_profile.tools();
+        let tools = self
+            .provider_profile
+            .tool_registry()
+            .definitions_for_policy(
+                self.config.tool_access_policy.as_deref(),
+                self.config.tool_exposure_mode,
+            );
         let has_tools = !tools.is_empty();
 
         Request {
@@ -1678,10 +1684,40 @@ mod tests {
     use tokio::time::{sleep, timeout};
 
     use super::*;
-    use crate::config::ToolApprovalAdapter;
+    use crate::config::{ToolAccess, ToolAccessPolicy, ToolApprovalAdapter, ToolExposureMode};
     use crate::subagent::SubAgentStatus;
     use crate::test_support::*;
     use crate::tool_registry::{RegisteredTool, ToolRegistry};
+
+    struct NamedToolAccessPolicy {
+        decisions: Vec<(&'static str, ToolAccess)>,
+    }
+
+    impl NamedToolAccessPolicy {
+        fn new(decisions: Vec<(&'static str, ToolAccess)>) -> Self {
+            Self { decisions }
+        }
+    }
+
+    impl ToolAccessPolicy for NamedToolAccessPolicy {
+        fn access_for_tool(&self, tool_name: &str) -> ToolAccess {
+            self.decisions
+                .iter()
+                .find_map(|(name, access)| (*name == tool_name).then_some(*access))
+                .unwrap_or(ToolAccess::Denied)
+        }
+    }
+
+    fn make_named_noop_tool(name: &str) -> RegisteredTool {
+        RegisteredTool {
+            definition: ToolDefinition {
+                name:        name.to_string(),
+                description: format!("Tool {name}"),
+                parameters:  serde_json::json!({"type": "object"}),
+            },
+            executor:   Arc::new(|_args, _ctx| Box::pin(async { Ok("ok".to_string()) })),
+        }
+    }
 
     #[derive(Clone)]
     enum ScriptedStreamCall {
@@ -2749,6 +2785,95 @@ mod tests {
             matches!(request.messages.first(), Some(message) if message.role == Role::User),
             "first request message should be user input"
         );
+    }
+
+    #[tokio::test]
+    async fn request_exposes_all_registered_tools_when_no_access_policy_is_set() {
+        let provider = Arc::new(CapturingLlmProvider::new());
+        let provider_ref = provider.clone();
+        let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
+        let mut registry = ToolRegistry::new();
+        registry.register(make_named_noop_tool("read_file"));
+        registry.register(make_named_noop_tool("write_file"));
+        let profile = Arc::new(TestProfile::with_tools(registry));
+        let env = Arc::new(MockSandbox::default());
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
+
+        session.process_input("test").await.unwrap();
+
+        let captured = provider_ref.captured_request.lock().unwrap();
+        let request = captured
+            .as_ref()
+            .expect("request should have been captured");
+        let tools = request.tools.as_ref().expect("tools should be exposed");
+        let tool_names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
+        assert_eq!(tool_names.len(), 2);
+        assert!(tool_names.contains(&"read_file"));
+        assert!(tool_names.contains(&"write_file"));
+    }
+
+    #[tokio::test]
+    async fn request_omits_tools_denied_by_access_policy() {
+        let provider = Arc::new(CapturingLlmProvider::new());
+        let provider_ref = provider.clone();
+        let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
+        let mut registry = ToolRegistry::new();
+        registry.register(make_named_noop_tool("read_file"));
+        registry.register(make_named_noop_tool("write_file"));
+        let profile = Arc::new(TestProfile::with_tools(registry));
+        let env = Arc::new(MockSandbox::default());
+        let config = SessionOptions {
+            tool_access_policy: Some(Arc::new(NamedToolAccessPolicy::new(vec![
+                ("read_file", ToolAccess::Allowed),
+                ("write_file", ToolAccess::Denied),
+            ]))),
+            tool_exposure_mode: ToolExposureMode::IncludeRequiresApproval,
+            ..SessionOptions::default()
+        };
+        let mut session = Session::new(client, profile, env, config, None);
+
+        session.process_input("test").await.unwrap();
+
+        let captured = provider_ref.captured_request.lock().unwrap();
+        let request = captured
+            .as_ref()
+            .expect("request should have been captured");
+        let tools = request.tools.as_ref().expect("tools should be exposed");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "read_file");
+    }
+
+    #[tokio::test]
+    async fn request_exposes_approval_required_tools_when_mode_allows_them() {
+        let provider = Arc::new(CapturingLlmProvider::new());
+        let provider_ref = provider.clone();
+        let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
+        let mut registry = ToolRegistry::new();
+        registry.register(make_named_noop_tool("read_file"));
+        registry.register(make_named_noop_tool("shell"));
+        let profile = Arc::new(TestProfile::with_tools(registry));
+        let env = Arc::new(MockSandbox::default());
+        let config = SessionOptions {
+            tool_access_policy: Some(Arc::new(NamedToolAccessPolicy::new(vec![
+                ("read_file", ToolAccess::Allowed),
+                ("shell", ToolAccess::RequiresApproval),
+            ]))),
+            tool_exposure_mode: ToolExposureMode::IncludeRequiresApproval,
+            ..SessionOptions::default()
+        };
+        let mut session = Session::new(client, profile, env, config, None);
+
+        session.process_input("test").await.unwrap();
+
+        let captured = provider_ref.captured_request.lock().unwrap();
+        let request = captured
+            .as_ref()
+            .expect("request should have been captured");
+        let tools = request.tools.as_ref().expect("tools should be exposed");
+        let tool_names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
+        assert_eq!(tool_names.len(), 2);
+        assert!(tool_names.contains(&"read_file"));
+        assert!(tool_names.contains(&"shell"));
     }
 
     #[tokio::test]

@@ -9,6 +9,46 @@ use fabro_mcp::config::McpServerSettings;
 /// `Err(message)` to deny with the given message.
 pub type ToolApprovalFn = Arc<dyn Fn(&str, &serde_json::Value) -> Result<(), String> + Send + Sync>;
 
+/// Static access classification for a registered tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolAccess {
+    /// The tool can be exposed and executed without an approval step.
+    Allowed,
+    /// The tool can be exposed only when the session has an approval path.
+    RequiresApproval,
+    /// The tool must not be exposed or executed.
+    Denied,
+}
+
+impl ToolAccess {
+    #[must_use]
+    pub const fn is_exposed(self, mode: ToolExposureMode) -> bool {
+        match self {
+            Self::Allowed => true,
+            Self::RequiresApproval => matches!(mode, ToolExposureMode::IncludeRequiresApproval),
+            Self::Denied => false,
+        }
+    }
+}
+
+/// Controls whether approval-required tools are included in LLM tool schemas.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ToolExposureMode {
+    /// Expose only tools that can run without an approval path.
+    #[default]
+    AutoApprovedOnly,
+    /// Expose tools classified as [`ToolAccess::RequiresApproval`].
+    IncludeRequiresApproval,
+}
+
+/// Static policy used to decide which tools are effectively available.
+///
+/// This policy is intentionally name-only. Keep argument-sensitive approval,
+/// logging, telemetry, and async decisions in [`ToolHookCallback`].
+pub trait ToolAccessPolicy: Send + Sync {
+    fn access_for_tool(&self, tool_name: &str) -> ToolAccess;
+}
+
 /// Decision returned by a [`ToolHookCallback`] before a tool executes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ToolHookDecision {
@@ -78,6 +118,11 @@ pub struct SessionOptions {
     pub user_instructions: Option<String>,
     /// Async hook callbacks invoked around tool execution.
     pub tool_hooks: Option<Arc<dyn ToolHookCallback>>,
+    /// Static policy used to filter advertised tools and block hidden calls.
+    /// `None` preserves legacy behavior: all registered tools are exposed.
+    pub tool_access_policy: Option<Arc<dyn ToolAccessPolicy>>,
+    /// Tool schema exposure mode used when `tool_access_policy` is set.
+    pub tool_exposure_mode: ToolExposureMode,
     pub enable_context_compaction: bool,
     pub compaction_threshold_percent: usize,
     pub compaction_preserve_turns: usize,
@@ -115,6 +160,11 @@ impl std::fmt::Debug for SessionOptions {
                 "tool_hooks",
                 &self.tool_hooks.as_ref().map(|_| "<callback>"),
             )
+            .field(
+                "tool_access_policy",
+                &self.tool_access_policy.as_ref().map(|_| "<policy>"),
+            )
+            .field("tool_exposure_mode", &self.tool_exposure_mode)
             .field("enable_context_compaction", &self.enable_context_compaction)
             .field(
                 "compaction_threshold_percent",
@@ -146,6 +196,8 @@ impl Default for SessionOptions {
             git_root: None,
             user_instructions: None,
             tool_hooks: None,
+            tool_access_policy: None,
+            tool_exposure_mode: ToolExposureMode::AutoApprovedOnly,
             enable_context_compaction: true,
             compaction_threshold_percent: 80,
             compaction_preserve_turns: 6,
@@ -156,9 +208,57 @@ impl Default for SessionOptions {
     }
 }
 
+impl SessionOptions {
+    #[must_use]
+    pub fn tool_access_for(&self, tool_name: &str) -> ToolAccess {
+        self.tool_access_policy
+            .as_ref()
+            .map_or(ToolAccess::Allowed, |policy| {
+                policy.access_for_tool(tool_name)
+            })
+    }
+
+    #[must_use]
+    pub fn exposes_tool(&self, tool_name: &str) -> bool {
+        self.tool_access_policy.as_ref().is_none_or(|policy| {
+            policy
+                .access_for_tool(tool_name)
+                .is_exposed(self.tool_exposure_mode)
+        })
+    }
+
+    #[must_use]
+    pub fn tool_access_denial_reason(&self, tool_name: &str) -> Option<String> {
+        self.tool_access_policy.as_ref()?;
+        match self.tool_access_for(tool_name) {
+            ToolAccess::Allowed => None,
+            ToolAccess::RequiresApproval
+                if matches!(
+                    self.tool_exposure_mode,
+                    ToolExposureMode::IncludeRequiresApproval
+                ) =>
+            {
+                None
+            }
+            ToolAccess::RequiresApproval => Some(format!(
+                "{tool_name} tool requires approval, but this session does not expose approval-required tools"
+            )),
+            ToolAccess::Denied => Some(format!("{tool_name} tool denied by tool access policy")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct StaticToolPolicy(ToolAccess);
+
+    impl ToolAccessPolicy for StaticToolPolicy {
+        fn access_for_tool(&self, _tool_name: &str) -> ToolAccess {
+            self.0
+        }
+    }
 
     #[test]
     fn default_config_values() {
@@ -174,6 +274,11 @@ mod tests {
         assert_eq!(config.loop_detection_window, 10);
         assert_eq!(config.max_subagent_depth, 1);
         assert!(config.user_instructions.is_none());
+        assert!(config.tool_access_policy.is_none());
+        assert_eq!(
+            config.tool_exposure_mode,
+            ToolExposureMode::AutoApprovedOnly
+        );
         assert!(config.mcp_servers.is_empty());
         assert!(config.wall_clock_timeout.is_none());
     }
@@ -201,6 +306,50 @@ mod tests {
     #[test]
     fn tool_hook_decision_default_is_proceed() {
         assert_eq!(ToolHookDecision::default(), ToolHookDecision::Proceed);
+    }
+
+    #[test]
+    fn no_tool_access_policy_exposes_tools_by_default() {
+        let config = SessionOptions::default();
+        assert_eq!(config.tool_access_for("shell"), ToolAccess::Allowed);
+        assert!(config.exposes_tool("shell"));
+        assert!(config.tool_access_denial_reason("shell").is_none());
+    }
+
+    #[test]
+    fn denied_tool_access_has_denial_reason() {
+        let config = SessionOptions {
+            tool_access_policy: Some(Arc::new(StaticToolPolicy(ToolAccess::Denied))),
+            ..SessionOptions::default()
+        };
+        let reason = config
+            .tool_access_denial_reason("shell")
+            .expect("denied tool should have reason");
+        assert!(reason.contains("denied by tool access policy"));
+        assert!(!config.exposes_tool("shell"));
+    }
+
+    #[test]
+    fn approval_required_tools_follow_exposure_mode() {
+        let config = SessionOptions {
+            tool_access_policy: Some(Arc::new(StaticToolPolicy(ToolAccess::RequiresApproval))),
+            tool_exposure_mode: ToolExposureMode::AutoApprovedOnly,
+            ..SessionOptions::default()
+        };
+        assert!(!config.exposes_tool("shell"));
+        assert!(
+            config
+                .tool_access_denial_reason("shell")
+                .expect("hidden approval tool should have reason")
+                .contains("requires approval")
+        );
+
+        let config = SessionOptions {
+            tool_exposure_mode: ToolExposureMode::IncludeRequiresApproval,
+            ..config
+        };
+        assert!(config.exposes_tool("shell"));
+        assert!(config.tool_access_denial_reason("shell").is_none());
     }
 
     #[tokio::test]

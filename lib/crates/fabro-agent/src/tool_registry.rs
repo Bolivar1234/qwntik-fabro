@@ -6,6 +6,7 @@ use std::sync::Arc;
 use fabro_llm::types::ToolDefinition;
 use tokio_util::sync::CancellationToken;
 
+use crate::config::{ToolAccessPolicy, ToolExposureMode};
 use crate::sandbox::Sandbox;
 use crate::session::ToolEnvProvider;
 
@@ -70,6 +71,27 @@ impl ToolRegistry {
     }
 
     #[must_use]
+    pub fn definitions_for_policy(
+        &self,
+        policy: Option<&dyn ToolAccessPolicy>,
+        exposure_mode: ToolExposureMode,
+    ) -> Vec<ToolDefinition> {
+        let Some(policy) = policy else {
+            return self.definitions();
+        };
+
+        self.tools
+            .values()
+            .filter(|tool| {
+                policy
+                    .access_for_tool(&tool.definition.name)
+                    .is_exposed(exposure_mode)
+            })
+            .map(|tool| tool.definition.clone())
+            .collect()
+    }
+
+    #[must_use]
     pub fn names(&self) -> Vec<String> {
         self.tools.keys().cloned().collect()
     }
@@ -84,8 +106,33 @@ impl Default for ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{ToolAccess, ToolAccessPolicy, ToolExposureMode};
     use crate::sandbox::Sandbox;
     use crate::test_support::MockSandbox;
+
+    struct NamedPolicy {
+        decisions: HashMap<String, ToolAccess>,
+    }
+
+    impl NamedPolicy {
+        fn new(decisions: impl IntoIterator<Item = (&'static str, ToolAccess)>) -> Self {
+            Self {
+                decisions: decisions
+                    .into_iter()
+                    .map(|(name, access)| (name.to_string(), access))
+                    .collect(),
+            }
+        }
+    }
+
+    impl ToolAccessPolicy for NamedPolicy {
+        fn access_for_tool(&self, tool_name: &str) -> ToolAccess {
+            self.decisions
+                .get(tool_name)
+                .copied()
+                .unwrap_or(ToolAccess::Denied)
+        }
+    }
 
     fn make_tool(name: &str) -> RegisteredTool {
         RegisteredTool {
@@ -164,6 +211,68 @@ mod tests {
         let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
         assert!(names.contains(&"tool_a"));
         assert!(names.contains(&"tool_b"));
+    }
+
+    #[test]
+    fn definitions_with_no_policy_returns_all_registered_tools() {
+        let mut registry = ToolRegistry::new();
+        registry.register(make_tool("allowed"));
+        registry.register(make_tool("denied"));
+
+        let defs = registry.definitions_for_policy(None, ToolExposureMode::AutoApprovedOnly);
+
+        let names: Vec<&str> = defs.iter().map(|tool| tool.name.as_str()).collect();
+        assert_eq!(defs.len(), 2);
+        assert!(names.contains(&"allowed"));
+        assert!(names.contains(&"denied"));
+    }
+
+    #[test]
+    fn definitions_for_policy_omits_denied_tools() {
+        let mut registry = ToolRegistry::new();
+        registry.register(make_tool("read_file"));
+        registry.register(make_tool("write_file"));
+        let policy = NamedPolicy::new([
+            ("read_file", ToolAccess::Allowed),
+            ("write_file", ToolAccess::Denied),
+        ]);
+
+        let defs = registry
+            .definitions_for_policy(Some(&policy), ToolExposureMode::IncludeRequiresApproval);
+
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].name, "read_file");
+    }
+
+    #[test]
+    fn definitions_for_policy_exposes_approval_tools_only_when_enabled() {
+        let mut registry = ToolRegistry::new();
+        registry.register(make_tool("read_file"));
+        registry.register(make_tool("shell"));
+        let policy = NamedPolicy::new([
+            ("read_file", ToolAccess::Allowed),
+            ("shell", ToolAccess::RequiresApproval),
+        ]);
+
+        let auto_only =
+            registry.definitions_for_policy(Some(&policy), ToolExposureMode::AutoApprovedOnly);
+        let with_approval = registry
+            .definitions_for_policy(Some(&policy), ToolExposureMode::IncludeRequiresApproval);
+
+        assert_eq!(
+            auto_only
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["read_file"]
+        );
+        let with_approval_names: Vec<&str> = with_approval
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect();
+        assert_eq!(with_approval_names.len(), 2);
+        assert!(with_approval_names.contains(&"read_file"));
+        assert!(with_approval_names.contains(&"shell"));
     }
 
     #[test]
