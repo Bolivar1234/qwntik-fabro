@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use fabro_auth::CredentialSource;
 use fabro_llm::client::Client;
@@ -1008,22 +1008,6 @@ impl Session {
         }
     }
 
-    fn retry_delay_for_error(
-        retry_policy: &RetryPolicy,
-        err: &LlmError,
-        attempt: u32,
-    ) -> Option<Duration> {
-        if let Some(retry_after) = err.retry_after() {
-            let retry_after = Duration::from_secs_f64(retry_after);
-            if retry_after > retry_policy.backoff.max_delay {
-                return None;
-            }
-            Some(retry_after)
-        } else {
-            Some(retry_policy.backoff.delay_for_attempt(attempt + 1))
-        }
-    }
-
     #[must_use]
     pub fn followup_queue_handle(&self) -> Arc<Mutex<VecDeque<String>>> {
         self.followup_queue.clone()
@@ -1421,7 +1405,7 @@ impl Session {
                     let can_retry = err.retryable() && stream_attempt < STREAM_CONSUME_RETRIES;
                     let retry_attempt = u32::try_from(stream_attempt).unwrap_or(u32::MAX);
                     let retry_delay = can_retry
-                        .then(|| Self::retry_delay_for_error(&retry_policy, &err, retry_attempt))
+                        .then(|| retry::retry_delay(&retry_policy, &err, retry_attempt))
                         .flatten();
 
                     if let Some(delay) = retry_delay {

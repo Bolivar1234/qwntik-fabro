@@ -287,16 +287,6 @@ impl Sandbox for WorktreeSandbox {
         self.inner.read_file_bytes(&resolved).await
     }
 
-    async fn read_file(
-        &self,
-        path: &str,
-        offset: Option<usize>,
-        limit: Option<usize>,
-    ) -> crate::Result<String> {
-        let resolved = self.resolve_path(path);
-        self.inner.read_file(&resolved, offset, limit).await
-    }
-
     async fn write_file(&self, path: &str, content: &str) -> crate::Result<()> {
         let resolved = self.resolve_path(path);
         self.inner.write_file(&resolved, content).await

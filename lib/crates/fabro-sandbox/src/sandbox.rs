@@ -493,12 +493,12 @@ pub type SandboxEventCallback = Arc<dyn Fn(SandboxEvent) + Send + Sync>;
 
 /// Formats file content with line numbers for display.
 ///
-/// Applies optional offset (0-based lines to skip) and limit (max lines to
-/// return). Line numbers are 1-based and right-aligned.
+/// Applies optional offset (1-based starting line number) and limit (max lines
+/// to return). Line numbers are 1-based and right-aligned.
 #[must_use]
 pub fn format_lines_numbered(content: &str, offset: Option<usize>, limit: Option<usize>) -> String {
     let all_lines: Vec<&str> = content.lines().collect();
-    let skip = offset.unwrap_or(0);
+    let skip = offset.unwrap_or(1).saturating_sub(1);
     let take = limit.unwrap_or(all_lines.len());
     let selected: Vec<&str> = all_lines.into_iter().skip(skip).take(take).collect();
     let width = (skip + selected.len()).to_string().len().max(1);
@@ -1485,7 +1485,7 @@ mod tests {
 
     #[test]
     fn format_lines_numbered_with_offset_limit() {
-        let result = format_lines_numbered("a\nb\nc\nd\ne", Some(1), Some(2));
+        let result = format_lines_numbered("a\nb\nc\nd\ne", Some(2), Some(2));
         assert!(result.contains("2 | b"));
         assert!(result.contains("3 | c"));
         assert!(!result.contains("1 | a"));

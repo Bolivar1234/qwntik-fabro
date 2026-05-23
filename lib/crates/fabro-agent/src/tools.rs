@@ -6,13 +6,14 @@ use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request, ToolDefinition};
 use fabro_model::ModelHandle;
 use fabro_static::EnvVars;
-use futures::future::join_all;
+use futures::{StreamExt, stream};
 
 use crate::config::SessionOptions;
 use crate::sandbox::GrepOptions;
 use crate::tool_registry::{RegisteredTool, ToolRegistry};
 
 const MAX_WEB_FETCH_BYTES: usize = 100 * 1024;
+const MAX_READ_MANY_FILES_CONCURRENCY: usize = 8;
 
 /// Configuration for the optional LLM-based summarizer used by `web_fetch`.
 #[derive(Clone)]
@@ -387,27 +388,34 @@ pub(crate) fn make_read_many_files_tool() -> RegisteredTool {
         },
         executor:   Arc::new(|args, ctx| {
             Box::pin(async move {
-                let paths: Vec<&str> = args["paths"]
+                let paths: Vec<String> = args["paths"]
                     .as_array()
                     .ok_or_else(|| "paths must be an array".to_string())?
                     .iter()
                     .map(|p| {
                         p.as_str()
                             .ok_or_else(|| "each path must be a string".to_string())
+                            .map(str::to_string)
                     })
                     .collect::<Result<_, _>>()?;
 
-                let reads = paths.iter().map(|path| {
-                    let env = Arc::clone(&ctx.env);
-                    async move { (*path, env.read_file(path, None, None).await) }
-                });
-                let results = join_all(reads).await;
+                let results = stream::iter(paths)
+                    .map(|path| {
+                        let env = Arc::clone(&ctx.env);
+                        async move {
+                            let result = env.read_file(&path, None, None).await;
+                            (path, result)
+                        }
+                    })
+                    .buffered(MAX_READ_MANY_FILES_CONCURRENCY)
+                    .collect::<Vec<_>>()
+                    .await;
 
                 let mut output = String::new();
                 for (path, result) in results {
                     match result {
                         Ok(content) => {
-                            ctx.env.mark_agent_read(path);
+                            ctx.env.mark_agent_read(&path);
                             let _ = write!(output, "=== {path} ===\n{content}\n\n");
                         }
                         Err(err) => {
@@ -732,7 +740,7 @@ mod tests {
             },
         )
         .await;
-        assert_eq!(result.unwrap(), "3 | line3\n4 | line4\n");
+        assert_eq!(result.unwrap(), "2 | line2\n3 | line3\n");
     }
 
     #[tokio::test]

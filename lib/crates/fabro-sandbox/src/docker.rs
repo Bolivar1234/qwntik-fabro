@@ -32,7 +32,7 @@ use crate::sandbox::{StdioProcessControl, optional_timeout, resolve_path};
 use crate::{
     CommandOutputCallback, DEFAULT_EXEC_OUTPUT_TAIL_BYTES, DirEntry, ExecResult,
     ExecStreamingResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback, StderrCollector,
-    StdioProcess, StdioProcessHandle, StdioProcessTermination, shell_quote,
+    StdioProcess, StdioProcessHandle, StdioProcessTermination, format_lines_numbered, shell_quote,
 };
 
 pub(crate) const WORKING_DIRECTORY: &str = "/workspace";
@@ -1655,6 +1655,26 @@ impl Sandbox for DockerSandbox {
 
     async fn read_file_bytes(&self, path: &str) -> crate::Result<Vec<u8>> {
         self.download_file_bytes(path).await
+    }
+
+    async fn read_file(
+        &self,
+        path: &str,
+        offset: Option<usize>,
+        limit: Option<usize>,
+    ) -> crate::Result<String> {
+        let container_path = self.resolve_container_path(path);
+        let (stdout, stderr, exit_code) = self
+            .docker_exec(vec!["cat".to_string(), container_path.clone()], None, None)
+            .await?;
+
+        if exit_code != 0 {
+            return Err(crate::Error::message(format!(
+                "Failed to read {container_path}: {stderr}"
+            )));
+        }
+
+        Ok(format_lines_numbered(&stdout, offset, limit))
     }
 
     async fn write_file(&self, path: &str, content: &str) -> crate::Result<()> {
