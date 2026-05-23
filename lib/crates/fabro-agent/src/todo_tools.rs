@@ -163,7 +163,7 @@ Set up task dependencies:
 {"taskId": "2", "addBlockedBy": ["1"]}
 ```"#;
 
-const TASK_LIST_DESCRIPTION: &str = r#"Use this tool to list all tasks in the task list.
+const TASK_LIST_DESCRIPTION: &str = r"Use this tool to list all tasks in the task list.
 
 ## When to Use This Tool
 
@@ -183,7 +183,7 @@ Returns a summary of each task:
 - **owner**: Owner if assigned
 - **blockedBy**: List of open task IDs that must be resolved first. Tasks with blockedBy entries should not be started until dependencies resolve.
 
-Use TaskUpdate to change task status, owner, details, or dependencies."#;
+Use TaskUpdate to change task status, owner, details, or dependencies.";
 
 /// Deterministic todo id derived from `<list_id>::<step>`. Codex identifies
 /// a plan step by the exact step text, so the projection ID is the
