@@ -25,7 +25,7 @@ use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
 use tokio::time;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{Instrument as _, Span, debug, info, warn};
 
 use crate::agent_profile::AgentProfile;
 use crate::compaction::{check_context_usage, compact_context};
@@ -1780,7 +1780,8 @@ impl Session {
         let close_token = self.close_token.clone();
         let response_usage_fingerprints =
             Arc::clone(&self.context_window_response_usage_fingerprints);
-        tokio::spawn(async move {
+        let span = Span::current();
+        let count_task = async move {
             let count_result = tokio::select! {
                 biased;
                 () = close_token.cancelled() => return,
@@ -1829,7 +1830,8 @@ impl Session {
                 }
             };
             emitter.emit(session_id, AgentEvent::ContextWindowSnapshot(snapshot));
-        });
+        };
+        tokio::spawn(count_task.instrument(span));
 
         EmittedContextWindowSnapshot {
             local_snapshot,
@@ -2066,12 +2068,15 @@ mod tests {
     use anyhow::Context as _;
     use fabro_llm::error::{ProviderErrorDetail, ProviderErrorKind};
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
+    use fabro_llm::token_count::{InputTokenCount, InputTokenCountMethod};
     use fabro_llm::types::{
         ContentPart, ReasoningEffort, Request, Response, Role, StreamEvent, TokenCounts, ToolCall,
         ToolDefinition,
     };
     use futures::stream;
+    use tokio::sync::Notify;
     use tokio::time::{sleep, timeout};
+    use tracing::{Instrument as _, subscriber};
 
     use super::*;
     use crate::config::{ToolAccess, ToolAccessPolicy, ToolApprovalAdapter, ToolExposureMode};
@@ -2187,6 +2192,57 @@ mod tests {
                 ScriptedStreamCall::Events(events) => Ok(Box::pin(stream::iter(events))),
                 ScriptedStreamCall::Error(err) => Err(err),
             }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum ObservedSpan {
+        Missing,
+        Name(String),
+    }
+
+    struct SpanCheckingTokenCountProvider {
+        observed_span: Arc<Mutex<Option<ObservedSpan>>>,
+        notify:        Arc<Notify>,
+    }
+
+    #[async_trait::async_trait]
+    impl ProviderAdapter for SpanCheckingTokenCountProvider {
+        fn name(&self) -> &'static str {
+            "mock"
+        }
+
+        async fn complete(&self, _request: &Request) -> Result<Response, LlmError> {
+            Err(LlmError::Configuration {
+                message: "SpanCheckingTokenCountProvider does not implement complete()".into(),
+                source:  None,
+            })
+        }
+
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, LlmError> {
+            Ok(Box::pin(stream::iter(
+                ScriptedStreamProvider::events_for_response(text_response("OK")),
+            )))
+        }
+
+        async fn count_input_tokens(
+            &self,
+            request: &Request,
+        ) -> Result<Option<InputTokenCount>, LlmError> {
+            let span = Span::current()
+                .metadata()
+                .map_or(ObservedSpan::Missing, |metadata| {
+                    ObservedSpan::Name(metadata.name().to_string())
+                });
+            *self.observed_span.lock().unwrap() = Some(span);
+            self.notify.notify_waiters();
+            Ok(Some(InputTokenCount {
+                input_tokens: 12,
+                method:       InputTokenCountMethod::ProviderApi,
+                provider:     "mock".to_string(),
+                model:        request.model.clone(),
+                warnings:     vec![],
+            }))
         }
     }
 
@@ -2989,6 +3045,42 @@ mod tests {
             .as_ref()
             .expect("request should have been captured");
         assert_eq!(request.reasoning_effort, Some(ReasoningEffort::High));
+    }
+
+    #[tokio::test]
+    async fn context_window_token_count_task_inherits_current_run_span() {
+        let subscriber = tracing_subscriber::fmt().with_test_writer().finish();
+        let _guard = subscriber::set_default(subscriber);
+
+        let observed_span = Arc::new(Mutex::new(None));
+        let notify = Arc::new(Notify::new());
+        let provider = Arc::new(SpanCheckingTokenCountProvider {
+            observed_span: Arc::clone(&observed_span),
+            notify:        Arc::clone(&notify),
+        });
+        let client = make_client(provider).await;
+        let registry = ToolRegistry::new();
+        let profile = Arc::new(TestProfile::with_context_window(registry, 200_000));
+        let env = Arc::new(MockSandbox::default());
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
+
+        let run_span = tracing::info_span!("run", id = %"run_context_window");
+        session
+            .process_input("Hi")
+            .instrument(run_span)
+            .await
+            .unwrap();
+
+        if observed_span.lock().unwrap().is_none() {
+            timeout(Duration::from_secs(1), notify.notified())
+                .await
+                .expect("provider token count should run");
+        }
+
+        assert_eq!(
+            observed_span.lock().unwrap().clone(),
+            Some(ObservedSpan::Name("run".to_string()))
+        );
     }
 
     #[tokio::test]
