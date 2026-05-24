@@ -17,8 +17,8 @@ use fabro_mcp::connection_manager::McpConnectionManager;
 use fabro_mcp::http_transport;
 use fabro_model::{AgentProfileKind, Catalog, ModelRef, Speed};
 use fabro_types::{
-    PermissionLevel, Principal, SessionMessage, SessionRecord, StageContextWindowProjection,
-    SteeringMessage,
+    AgentToolSummary, PermissionLevel, Principal, SessionMessage, SessionRecord,
+    StageContextWindowProjection, SteeringMessage,
 };
 use futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, Notify, broadcast};
@@ -46,6 +46,7 @@ use crate::skills::{
 };
 use crate::subagent::{SubAgentCallbackEvent, SubAgentEventCallback, SubAgentManager};
 use crate::tool_execution::execute_tool_calls;
+use crate::tool_registry::ToolDefinitionWithSource;
 use crate::types::{
     AgentEvent, McpToolSummary, MemoryFileSummary, Message, SessionEvent, SessionState,
     SkillActivationSource, SkillSummary,
@@ -486,6 +487,34 @@ impl Session {
     #[must_use]
     pub fn permission_level(&self) -> Option<PermissionLevel> {
         self.config.permission_level
+    }
+
+    /// Effective tool list the model is exposed to after provider-profile
+    /// setup, optional registrations, MCP integration, and access-policy
+    /// filtering. This is the same path used to build outbound requests.
+    #[must_use]
+    pub fn effective_tools(&self) -> Vec<ToolDefinitionWithSource> {
+        self.provider_profile
+            .tool_registry()
+            .definitions_with_source_for_policy(
+                self.config.tool_access_policy.as_deref(),
+                self.config.tool_exposure_mode,
+            )
+    }
+
+    /// Public projection of `effective_tools()` for
+    /// `StageProjection.agent_tools` and the `agent.tools.available` event.
+    /// Sorted by name for deterministic snapshots; the underlying registry
+    /// stores tools in a `HashMap`.
+    #[must_use]
+    pub fn agent_tool_summaries(&self) -> Vec<AgentToolSummary> {
+        let mut summaries: Vec<_> = self
+            .effective_tools()
+            .iter()
+            .map(ToolDefinitionWithSource::to_agent_tool_summary)
+            .collect();
+        summaries.sort_by(|left, right| left.name.cmp(&right.name));
+        summaries
     }
 
     /// Initialize session by discovering project docs and capturing environment
@@ -1839,13 +1868,7 @@ impl Session {
         }
         messages.extend(self.history.convert_to_messages());
 
-        let tools_with_source = self
-            .provider_profile
-            .tool_registry()
-            .definitions_with_source_for_policy(
-                self.config.tool_access_policy.as_deref(),
-                self.config.tool_exposure_mode,
-            );
+        let tools_with_source = self.effective_tools();
         let tools: Vec<_> = tools_with_source
             .iter()
             .map(|tool| tool.definition.clone())
@@ -1895,13 +1918,11 @@ impl Session {
     }
 
     fn inject_task_reminder_if_needed(&mut self) {
-        let tools = self
-            .provider_profile
-            .tool_registry()
-            .definitions_for_policy(
-                self.config.tool_access_policy.as_deref(),
-                self.config.tool_exposure_mode,
-            );
+        let tools: Vec<_> = self
+            .effective_tools()
+            .into_iter()
+            .map(|tool| tool.definition)
+            .collect();
         let tool_names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
         if let Some(reminder) = task_reminder::maybe_reminder(&self.history, &tool_names) {
             self.history.push(Message::System {
@@ -3184,6 +3205,38 @@ mod tests {
         let tools = request.tools.as_ref().expect("tools should be exposed");
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].name, "read_file");
+    }
+
+    #[tokio::test]
+    async fn effective_tools_match_request_tool_filtering() {
+        let provider = Arc::new(CapturingLlmProvider::new());
+        let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
+        let mut registry = ToolRegistry::new();
+        registry.register(make_named_noop_tool("read_file"));
+        registry.register(make_named_noop_tool("apply_patch"));
+        registry.register(make_named_noop_tool("shell"));
+        let profile = Arc::new(TestProfile::with_tools(registry));
+        let env = Arc::new(MockSandbox::default());
+        let config = SessionOptions {
+            tool_access_policy: Some(Arc::new(NamedToolAccessPolicy::new(vec![
+                ("read_file", ToolAccess::Allowed),
+                ("apply_patch", ToolAccess::RequiresApproval),
+                ("shell", ToolAccess::Denied),
+            ]))),
+            tool_exposure_mode: ToolExposureMode::IncludeRequiresApproval,
+            ..SessionOptions::default()
+        };
+        let session = Session::new(client, profile, env, config, None);
+
+        let tools = session.effective_tools();
+        let mut tool_names: Vec<&str> = tools
+            .iter()
+            .map(|tool| tool.definition.name.as_str())
+            .collect();
+        tool_names.sort_unstable();
+
+        assert_eq!(tool_names, vec!["apply_patch", "read_file"]);
+        assert!(tools.iter().all(|tool| tool.source == ToolSource::Native));
     }
 
     #[tokio::test]

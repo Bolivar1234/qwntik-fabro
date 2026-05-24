@@ -506,6 +506,20 @@ fn last_assistant_response(session: &Session) -> String {
         .unwrap_or_default()
 }
 
+fn emit_agent_tools_available(
+    session: &Session,
+    node_id: &str,
+    stage_id: &StageId,
+    emitter: &Arc<Emitter>,
+) {
+    emitter.emit(&Event::AgentToolsAvailable {
+        node_id:    node_id.to_string(),
+        visit:      stage_id.visit(),
+        session_id: session.id().to_string(),
+        tools:      session.agent_tool_summaries(),
+    });
+}
+
 /// Spawn a task that subscribes to session events and:
 /// 1. Tracks file changes (write_file/edit_file tool calls) into shared state.
 /// 2. Forwards non-streaming agent events to the pipeline emitter.
@@ -1207,6 +1221,13 @@ impl CodergenBackend for AgentApiBackend {
                         return Err(err);
                     }
                 }
+                // Reused steerable sessions already emitted their effective
+                // tool list on first activation; the registry, access policy,
+                // and exposure mode are immutable for the session's lifetime,
+                // so re-emitting on every subsequent prompt is wasted work.
+                if !is_reused {
+                    emit_agent_tools_available(&session, &node.id, &stage_id, emitter);
+                }
                 session
                     .process_input_with_runtime(prompt, agent_tool_runtime.clone())
                     .await
@@ -1333,6 +1354,7 @@ impl CodergenBackend for AgentApiBackend {
                                 return Err(err);
                             }
                         }
+                        emit_agent_tools_available(&session, &node.id, &stage_id, emitter);
                         match session
                             .process_input_with_runtime(prompt, agent_tool_runtime.clone())
                             .await
