@@ -46,8 +46,8 @@ fn event_body_from_event(event: &Event) -> EventBody {
         } => EventBody::RunCreated(fabro_types::RunCreatedProps {
             title:            title.clone(),
             settings:         serde_json::from_value(settings.clone())
-                .expect("run.created settings"),
-            graph:            serde_json::from_value(graph.clone()).expect("run.created graph"),
+                .expect("run.created settings should deserialize: value was serialized from a typed struct in this session"),
+            graph:            serde_json::from_value(graph.clone()).expect("run.created graph should deserialize: value was serialized from a typed struct in this session"),
             workflow_source:  workflow_source.clone(),
             workflow_config:  workflow_config.clone(),
             labels:           labels.clone(),
@@ -651,7 +651,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 turn_id:      None,
             }),
             AgentEvent::Error { error } => EventBody::AgentError(fabro_types::AgentErrorProps {
-                error: serde_json::to_value(error).expect("serializable agent error"),
+                error: serde_json::to_value(error).expect("agent Error derives Serialize with no custom logic that can fail"),
                 visit: *visit,
             }),
             AgentEvent::Warning {
@@ -710,7 +710,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
                 model:      model.clone(),
                 attempt:    *attempt,
                 delay_secs: *delay_secs,
-                error:      serde_json::to_value(error).expect("serializable sdk error"),
+                error:      serde_json::to_value(error).expect("LLM SDK error derives Serialize with no custom logic that can fail"),
                 visit:      *visit,
             }),
             AgentEvent::SubAgentSpawned {
@@ -742,7 +742,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             } => EventBody::AgentSubFailed(fabro_types::AgentSubFailedProps {
                 agent_id: agent_id.clone(),
                 depth:    *depth,
-                error:    serde_json::to_value(error).expect("serializable agent error"),
+                error:    serde_json::to_value(error).expect("agent Error derives Serialize with no custom logic that can fail"),
                 visit:    *visit,
             }),
             AgentEvent::SubAgentClosed { agent_id, depth } => {
