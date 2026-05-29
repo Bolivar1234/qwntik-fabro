@@ -688,11 +688,9 @@ where
         effective_log_destination,
     );
     let resolved_app_settings = ResolvedAppStateSettings {
-        server_settings:               runtime_settings.server_settings,
-        manifest_run_defaults:         runtime_settings.manifest_run_defaults,
-        manifest_environment_defaults: runtime_settings.manifest_environment_defaults,
-        manifest_run_settings:         runtime_settings.manifest_run_settings,
-        llm_catalog_settings:          runtime_settings.llm_catalog_settings,
+        server_settings:       runtime_settings.server_settings,
+        manifest_run_defaults: runtime_settings.manifest_run_defaults,
+        llm_catalog_settings:  runtime_settings.llm_catalog_settings,
     };
     let resolved_server_settings = resolved_app_settings.server_settings.server.clone();
     validate_startup_configuration(&resolved_server_settings)?;
@@ -850,12 +848,9 @@ where
                                 .server_settings
                                 .with_storage_override(&data_dir_for_poll);
                             ResolvedAppStateSettings {
-                                server_settings:               resolved.server_settings,
-                                manifest_run_defaults:         resolved.manifest_run_defaults,
-                                manifest_environment_defaults: resolved
-                                    .manifest_environment_defaults,
-                                manifest_run_settings:         resolved.manifest_run_settings,
-                                llm_catalog_settings:          resolved.llm_catalog_settings,
+                                server_settings:       resolved.server_settings,
+                                manifest_run_defaults: resolved.manifest_run_defaults,
+                                llm_catalog_settings:  resolved.llm_catalog_settings,
                             }
                         });
                         match resolved {
@@ -1180,8 +1175,8 @@ mod tests {
     use std::task::Poll;
     use std::time::Duration;
 
+    use fabro_config::ServerSettingsBuilder;
     use fabro_config::bind::{Bind, BindRequest};
-    use fabro_config::{RunSettingsBuilder, ServerSettingsBuilder};
     use fabro_types::ServerSettings;
     use fabro_types::settings::interp::InterpString;
     use fabro_types::settings::server::{LogDestination, ObjectStoreSettings};
@@ -1241,14 +1236,10 @@ mod tests {
     }
 
     fn resolved_runtime_settings(source: &str) -> ResolvedAppStateSettings {
-        let manifest_run_defaults = manifest_run_defaults(source);
         ResolvedAppStateSettings {
-            manifest_run_settings: RunSettingsBuilder::from_run_layer(&manifest_run_defaults)
-                .map_err(|err| fabro_util::error::SharedError::new(anyhow::Error::new(err))),
-            manifest_run_defaults,
-            manifest_environment_defaults: fabro_config::MergeMap::default(),
-            server_settings: server_settings(source),
-            llm_catalog_settings: fabro_model::catalog::LlmCatalogSettings::default(),
+            manifest_run_defaults: manifest_run_defaults(source),
+            server_settings:       server_settings(source),
+            llm_catalog_settings:  fabro_model::catalog::LlmCatalogSettings::default(),
         }
     }
 

@@ -1829,6 +1829,7 @@ dependencies = [
  "fabro-client",
  "fabro-config",
  "fabro-dump",
+ "fabro-environment",
  "fabro-github",
  "fabro-graphviz",
  "fabro-hooks",
@@ -2005,6 +2006,22 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "fabro-environment"
+version = "0.246.0-nightly.0"
+dependencies = [
+ "fabro-config",
+ "fabro-types",
+ "hex",
+ "serde",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "toml_edit",
 ]
 
 [[package]]
@@ -2357,6 +2374,7 @@ dependencies = [
  "fabro-build-support",
  "fabro-client",
  "fabro-config",
+ "fabro-environment",
  "fabro-github",
  "fabro-graphviz",
  "fabro-hooks",
@@ -2678,6 +2696,7 @@ dependencies = [
  "fabro-config",
  "fabro-core",
  "fabro-dump",
+ "fabro-environment",
  "fabro-github",
  "fabro-graphviz",
  "fabro-hooks",

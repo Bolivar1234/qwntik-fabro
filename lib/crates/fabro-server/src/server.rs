@@ -51,10 +51,9 @@ pub use fabro_api::types::{
 };
 use fabro_auth::{CredentialSource, VaultCredentialSource, auth_issue_message};
 use fabro_automation::AutomationStore;
-#[cfg(test)]
-use fabro_config::RunSettingsBuilder;
 use fabro_config::daemon::ServerDaemon;
-use fabro_config::{EnvironmentLayer, MergeMap, RunLayer, Storage};
+use fabro_config::{RunLayer, Storage, WorkflowSettingsBuilder};
+use fabro_environment::EnvironmentStore;
 use fabro_interview::{
     Answer, AnswerSubmission, ControlInterviewer, Interviewer, Question, WorkerControlEnvelope,
 };
@@ -1064,6 +1063,7 @@ pub struct AppState {
     artifact_store: ArtifactStore,
     automation_store: Arc<AutomationStore>,
     automation_repo_cache: Arc<GitRepoCache>,
+    environment_store: Arc<EnvironmentStore>,
     #[cfg(any(test, feature = "test-support"))]
     automation_materializer_override: Option<Arc<dyn AutomationRunMaterializer>>,
     worker_tokens: WorkerTokenKeys,
@@ -1086,7 +1086,6 @@ pub struct AppState {
     pub(super) server_secrets: ServerSecrets,
     pub(crate) llm_source: Arc<dyn CredentialSource>,
     manifest_run_defaults: RwLock<Arc<RunLayer>>,
-    manifest_environment_defaults: RwLock<Arc<MergeMap<EnvironmentLayer>>>,
     manifest_run_settings: RwLock<std::result::Result<RunNamespace, SharedError>>,
     pub(crate) server_settings: RwLock<Arc<ServerSettings>>,
     catalog: RwLock<Arc<Catalog>>,
@@ -1109,6 +1108,10 @@ impl AppState {
         &self.automation_store
     }
 
+    pub(crate) fn environment_store(&self) -> &EnvironmentStore {
+        &self.environment_store
+    }
+
     pub(crate) async fn materialize_automation_run(
         &self,
         input: AutomationRunMaterializeInput,
@@ -1127,6 +1130,7 @@ impl AppState {
             credentials,
             self.github_api_base_url.clone(),
             self.http_client.clone(),
+            (*self.environment_store.catalog_layer()).clone(),
             Arc::clone(&self.automation_repo_cache),
         )
         .materialize(input)
@@ -1238,11 +1242,9 @@ pub(crate) struct AppStateConfig {
 
 #[derive(Clone)]
 pub(crate) struct ResolvedAppStateSettings {
-    pub(crate) server_settings:               ServerSettings,
-    pub(crate) manifest_run_defaults:         RunLayer,
-    pub(crate) manifest_environment_defaults: MergeMap<EnvironmentLayer>,
-    pub(crate) manifest_run_settings:         std::result::Result<RunNamespace, SharedError>,
-    pub(crate) llm_catalog_settings:          LlmCatalogSettings,
+    pub(crate) server_settings:       ServerSettings,
+    pub(crate) manifest_run_defaults: RunLayer,
+    pub(crate) llm_catalog_settings:  LlmCatalogSettings,
 }
 
 fn accumulate_billing_rollup(
@@ -1288,15 +1290,6 @@ impl AppState {
                 .manifest_run_defaults
                 .read()
                 .expect("manifest run defaults lock poisoned"),
-        )
-    }
-
-    pub(crate) fn manifest_environment_defaults(&self) -> Arc<MergeMap<EnvironmentLayer>> {
-        Arc::clone(
-            &self
-                .manifest_environment_defaults
-                .read()
-                .expect("manifest environment defaults lock poisoned"),
         )
     }
 
@@ -1542,13 +1535,14 @@ impl AppState {
         let ResolvedAppStateSettings {
             server_settings,
             manifest_run_defaults,
-            manifest_environment_defaults,
-            manifest_run_settings,
             llm_catalog_settings,
         } = resolved_settings;
         let server_settings = Arc::new(server_settings);
         let manifest_run_defaults = Arc::new(manifest_run_defaults);
-        let manifest_environment_defaults = Arc::new(manifest_environment_defaults);
+        let manifest_run_settings = resolve_manifest_run_settings_with_catalog(
+            manifest_run_defaults.as_ref(),
+            &self.environment_store,
+        );
         let catalog = Arc::new(
             Catalog::from_builtin_with_overrides(&llm_catalog_settings)
                 .context("building LLM model catalog")?,
@@ -1560,10 +1554,6 @@ impl AppState {
             .manifest_run_defaults
             .write()
             .expect("manifest run defaults lock poisoned") = manifest_run_defaults;
-        *self
-            .manifest_environment_defaults
-            .write()
-            .expect("manifest environment defaults lock poisoned") = manifest_environment_defaults;
         *self
             .manifest_run_settings
             .write()
@@ -2151,12 +2141,18 @@ fn build_prune_plan(
     })
 }
 
-#[cfg(test)]
-fn resolve_manifest_run_settings(
+fn resolve_manifest_run_settings_with_catalog(
     manifest_run_defaults: &RunLayer,
+    environment_store: &EnvironmentStore,
 ) -> std::result::Result<RunNamespace, SharedError> {
-    RunSettingsBuilder::from_run_layer(manifest_run_defaults)
-        .map_err(|err| SharedError::new(anyhow::Error::new(err)))
+    WorkflowSettingsBuilder::new()
+        .server_manifest_defaults(
+            manifest_run_defaults.clone(),
+            (*environment_store.catalog_layer()).clone(),
+        )
+        .build()
+        .map(|settings| settings.run)
+        .map_err(|err| SharedError::new(anyhow::Error::msg(err.to_string())))
 }
 
 fn system_sandbox_provider(
@@ -2250,6 +2246,13 @@ fn automation_dir_for_active_config(active_config_path: &std::path::Path) -> Pat
         .join("automations")
 }
 
+fn environment_dir_for_active_config(active_config_path: &std::path::Path) -> PathBuf {
+    active_config_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("environments")
+}
+
 pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppState>> {
     let AppStateConfig {
         resolved_settings,
@@ -2281,6 +2284,12 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             .map_err(anyhow::Error::new)
             .context("load automations")?,
     );
+    let environment_dir = environment_dir_for_active_config(&active_config_path);
+    let environment_store = Arc::new(
+        EnvironmentStore::load_or_seed(environment_dir)
+            .map_err(anyhow::Error::new)
+            .context("load environments")?,
+    );
     let variables = VariableStore::load(variables_path).context("load variables")?;
     let variables = Arc::new(AsyncRwLock::new(variables));
     let vault = match preloaded_vault {
@@ -2296,9 +2305,10 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
     let (global_event_tx, _) = broadcast::channel(4096);
     let current_server_settings = Arc::new(resolved_settings.server_settings);
     let current_manifest_run_defaults = Arc::new(resolved_settings.manifest_run_defaults);
-    let current_manifest_environment_defaults =
-        Arc::new(resolved_settings.manifest_environment_defaults);
-    let current_manifest_run_settings = resolved_settings.manifest_run_settings;
+    let current_manifest_run_settings = resolve_manifest_run_settings_with_catalog(
+        current_manifest_run_defaults.as_ref(),
+        &environment_store,
+    );
     let current_catalog = Arc::new(
         Catalog::from_builtin_with_overrides(&resolved_settings.llm_catalog_settings)
             .context("building LLM model catalog")?,
@@ -2393,6 +2403,7 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         artifact_store,
         automation_store,
         automation_repo_cache,
+        environment_store,
         #[cfg(any(test, feature = "test-support"))]
         automation_materializer_override,
         worker_tokens,
@@ -2411,7 +2422,6 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
         server_secrets,
         llm_source,
         manifest_run_defaults: RwLock::new(current_manifest_run_defaults),
-        manifest_environment_defaults: RwLock::new(current_manifest_environment_defaults),
         manifest_run_settings: RwLock::new(current_manifest_run_settings),
         server_settings: RwLock::new(current_server_settings),
         catalog: RwLock::new(current_catalog),
