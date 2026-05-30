@@ -7,6 +7,7 @@ import type {
   WorkflowSettings,
 } from "@qltysh/fabro-api-client";
 
+import { findApiTrigger, findScheduleTrigger } from "../lib/automation";
 import { Panel, Row } from "./settings-panel";
 import { INPUT_CLASS } from "./ui";
 import { sandboxRuntime } from "../lib/run-sandbox-lifecycle";
@@ -15,7 +16,6 @@ export interface AutomationFormValues {
   id: string;
   name: string;
   description: string;
-  enabled: boolean;
   repository: string;
   ref: string;
   workflow: string;
@@ -28,7 +28,6 @@ export const EMPTY_AUTOMATION_FORM: AutomationFormValues = {
   id:              "",
   name:            "",
   description:     "",
-  enabled:         true,
   repository:      "",
   ref:             "main",
   workflow:        "",
@@ -45,13 +44,12 @@ const CRON_PRESETS: ReadonlyArray<{ label: string; value: string }> = [
 ];
 
 export function automationToFormValues(automation: Automation): AutomationFormValues {
-  const apiTrigger = automation.triggers.find((t) => t.type === "api");
-  const scheduleTrigger = automation.triggers.find((t) => t.type === "schedule");
+  const apiTrigger = findApiTrigger(automation);
+  const scheduleTrigger = findScheduleTrigger(automation);
   return {
     id:              automation.id,
     name:            automation.name,
     description:     automation.description ?? "",
-    enabled:         automation.enabled,
     repository:      automation.target.repository,
     ref:             automation.target.ref,
     workflow:        automation.target.workflow,
@@ -114,8 +112,7 @@ export function isFormValid(values: AutomationFormValues): boolean {
     values.name.trim() !== "" &&
     values.repository.trim() !== "" &&
     values.ref.trim() !== "" &&
-    values.workflow.trim() !== "" &&
-    (values.manualEnabled || values.scheduleEnabled)
+    values.workflow.trim() !== ""
   );
 }
 
@@ -270,13 +267,6 @@ export function AutomationFormFields({
             rows={2}
             placeholder="Diagnose and fix CI build failures by analyzing logs and applying targeted patches."
             className={`${INPUT_CLASS} resize-y`}
-          />
-        </Row>
-        <Row title="Enabled" help="Disabled automations skip scheduled triggers and reject API runs.">
-          <ToggleSwitch
-            checked={values.enabled}
-            onChange={(enabled) => patch({ enabled })}
-            label="Enable automation"
           />
         </Row>
       </Panel>
