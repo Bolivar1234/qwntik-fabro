@@ -238,6 +238,15 @@ impl TestAppStateBuilder {
         let active_config_path = self
             .active_config_path
             .unwrap_or_else(|| vault_path.with_file_name("settings.toml"));
+        // Production seeds environments at install time, not on startup. Tests
+        // exercise an installed instance, so seed the built-ins next to the
+        // settings file before `build_app_state` loads them.
+        let environment_dir = active_config_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("environments");
+        fabro_environment::seed_environments(&environment_dir)
+            .expect("test environments should seed");
         build_app_state(AppStateConfig {
             resolved_settings: resolved_runtime_settings_for_tests(
                 self.server_settings,

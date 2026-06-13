@@ -9,8 +9,7 @@ use fabro_types::settings::run::{EnvironmentNetworkMode, RunEnvironmentSettings}
 
 #[cfg(feature = "daytona")]
 use crate::config::{
-    DaytonaNetwork, DaytonaSnapshotSettings, DaytonaVolumeMount,
-    DockerfileSource as SandboxDockerfileSource,
+    DaytonaNetwork, DaytonaSnapshotSettings, DockerfileSource as SandboxDockerfileSource,
 };
 #[cfg(feature = "daytona")]
 use crate::daytona::DaytonaConfig;
@@ -29,15 +28,6 @@ pub fn daytona_config_from_environment(
             .auto_stop
             .map(|duration| duration_to_minutes_i32(duration.as_std())),
         labels: (!settings.labels.is_empty()).then(|| settings.labels.clone()),
-        volumes: settings
-            .volumes
-            .iter()
-            .map(|volume| DaytonaVolumeMount {
-                volume_id:  volume.id.clone(),
-                mount_path: volume.mount_path.clone(),
-                subpath:    volume.subpath.clone(),
-            })
-            .collect(),
         snapshot: settings
             .image
             .dockerfile

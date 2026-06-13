@@ -3,17 +3,17 @@ use std::path::Path;
 
 use fabro_config::{
     EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLayer, EnvironmentLifecycleLayer,
-    EnvironmentNetworkLayer, EnvironmentResourcesLayer, EnvironmentVolumeLayer, StickyMap,
+    EnvironmentNetworkLayer, EnvironmentResourcesLayer, StickyMap,
 };
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
     DockerfileSource, EnvironmentImageSettings, EnvironmentLifecycleSettings,
     EnvironmentNetworkMode, EnvironmentNetworkSettings, EnvironmentResourcesSettings,
-    EnvironmentSettings, EnvironmentVolumeSettings,
+    EnvironmentSettings,
 };
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value, value};
+use toml_edit::{Array, DocumentMut, Item, Table, Value, value};
 
 use crate::{
     EnvironmentId, EnvironmentRevision, EnvironmentStoreError, EnvironmentValidationError,
@@ -65,6 +65,25 @@ impl Environment {
         ))
     }
 
+    /// Builds an in-memory environment from settings without touching the
+    /// filesystem. Unlike [`from_settings`], this never inlines Dockerfile
+    /// paths, so it stays synchronous — suitable for reserved environments
+    /// (e.g. `local`) that carry no Dockerfile and are never persisted.
+    pub(crate) fn synthetic(
+        id: EnvironmentId,
+        settings: &EnvironmentSettings,
+    ) -> Result<Self, EnvironmentStoreError> {
+        let persisted = environment_settings_to_layer(settings);
+        let settings = resolve_environment(&persisted)?;
+        let bytes = canonical_bytes(&persisted).into_bytes();
+        let revision = EnvironmentRevision::from_bytes(&bytes);
+        Ok(Self {
+            id,
+            revision,
+            settings,
+        })
+    }
+
     pub(crate) fn to_layer(&self) -> EnvironmentLayer {
         environment_settings_to_layer(&self.settings)
     }
@@ -95,9 +114,6 @@ pub(crate) fn canonical_bytes(layer: &EnvironmentLayer) -> String {
         append_lifecycle(doc.as_table_mut(), lifecycle);
     }
     append_string_map(doc.as_table_mut(), "labels", &layer.labels);
-    if let Some(volumes) = layer.volumes.as_deref() {
-        append_volumes(doc.as_table_mut(), volumes);
-    }
     append_interp_map(doc.as_table_mut(), "env", &layer.env);
     doc.to_string()
 }
@@ -169,7 +185,6 @@ fn environment_settings_to_layer(settings: &EnvironmentSettings) -> EnvironmentL
         network:   network_settings_to_layer(&settings.network),
         lifecycle: lifecycle_settings_to_layer(&settings.lifecycle),
         labels:    StickyMap::from(settings.labels.clone()),
-        volumes:   volumes_settings_to_layer(&settings.volumes),
         env:       StickyMap::from(settings.env.clone()),
     }
 }
@@ -227,23 +242,6 @@ fn lifecycle_settings_to_layer(
         stop_on_terminal: (!settings.stop_on_terminal).then_some(false),
         auto_stop:        settings.auto_stop,
     })
-}
-
-fn volumes_settings_to_layer(
-    settings: &[EnvironmentVolumeSettings],
-) -> Option<Vec<EnvironmentVolumeLayer>> {
-    if settings.is_empty() {
-        return None;
-    }
-    Some(settings.iter().map(volume_settings_to_layer).collect())
-}
-
-fn volume_settings_to_layer(settings: &EnvironmentVolumeSettings) -> EnvironmentVolumeLayer {
-    EnvironmentVolumeLayer {
-        id:         settings.id.clone(),
-        mount_path: settings.mount_path.clone(),
-        subpath:    settings.subpath.clone(),
-    }
 }
 
 fn append_image(root: &mut Table, image: &EnvironmentImageLayer) {
@@ -323,23 +321,6 @@ fn append_interp_map(root: &mut Table, name: &str, map: &StickyMap<InterpString>
     for (key, entry) in sorted_map(map) {
         table[key] = value(entry.as_source());
     }
-}
-
-fn append_volumes(root: &mut Table, volumes: &[EnvironmentVolumeLayer]) {
-    if volumes.is_empty() {
-        return;
-    }
-    let mut array = ArrayOfTables::new();
-    for volume in volumes {
-        let mut table = Table::new();
-        table["id"] = value(volume.id.as_str());
-        table["mount_path"] = value(volume.mount_path.as_str());
-        if let Some(subpath) = volume.subpath.as_deref() {
-            table["subpath"] = value(subpath);
-        }
-        array.push(table);
-    }
-    root["volumes"] = Item::ArrayOfTables(array);
 }
 
 fn ensure_table<'a>(root: &'a mut Table, path: &[&str]) -> &'a mut Table {

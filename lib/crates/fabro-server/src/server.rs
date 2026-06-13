@@ -1862,7 +1862,10 @@ async fn http_log_middleware(mut req: axum_extract::Request, next: Next) -> Resp
     let status = response.status().as_u16();
     let latency_ms = start.elapsed().as_millis();
     let auth_context = auth_slot.log_snapshot();
-    let principal_kind = auth_context.principal.kind();
+    let principal_kind = auth_context
+        .principal
+        .as_ref()
+        .map_or("none", Principal::kind);
     let auth_status = auth_context.auth_status.as_str();
 
     macro_rules! emit_http_log {
@@ -1900,27 +1903,27 @@ async fn http_log_middleware(mut req: axum_extract::Request, next: Next) -> Resp
     macro_rules! emit_principal_http_log {
         ($level:ident) => {{
             match &auth_context.principal {
-                Principal::User(user) => emit_http_log!(
+                Some(Principal::User(user)) => emit_http_log!(
                     $level,
                     user_auth_method = user.auth_method.as_str(),
                     idp_issuer = user.identity.issuer(),
                     idp_subject = user.identity.subject(),
                     login = user.login.as_str(),
                 ),
-                Principal::Worker { run_id } => {
+                Some(Principal::Worker { run_id }) => {
                     emit_http_log!($level, run_id = run_id.to_string().as_str(),)
                 }
-                Principal::Webhook { delivery_id } => {
+                Some(Principal::Webhook { delivery_id }) => {
                     emit_http_log!($level, delivery_id = delivery_id.as_str(),)
                 }
-                Principal::Slack {
+                Some(Principal::Slack {
                     team_id, user_id, ..
-                } => emit_http_log!(
+                }) => emit_http_log!(
                     $level,
                     team_id = team_id.as_str(),
                     user_id = user_id.as_str(),
                 ),
-                Principal::Agent { .. } | Principal::System { .. } | Principal::Anonymous => {
+                None | Some(Principal::Agent { .. } | Principal::System { .. }) => {
                     emit_http_log!($level)
                 }
             }
@@ -2305,8 +2308,15 @@ pub(crate) fn build_app_state(config: AppStateConfig) -> anyhow::Result<Arc<AppS
             .context("load automations")?,
     );
     let environment_dir = environment_dir_for_active_config(&active_config_path);
+    let local_provider_enabled = resolved_settings
+        .server_settings
+        .server
+        .sandbox
+        .providers
+        .local
+        .enabled;
     let environment_store = Arc::new(
-        EnvironmentStore::load_or_seed(environment_dir)
+        EnvironmentStore::load(environment_dir, local_provider_enabled)
             .map_err(anyhow::Error::new)
             .context("load environments")?,
     );

@@ -1127,14 +1127,15 @@ mod tests {
 
     use chrono::Utc;
     use fabro_config::{
-        EnvironmentImageLayer, EnvironmentNetworkLayer, EnvironmentResourcesLayer,
-        EnvironmentVolumeLayer, RunCloneLayer, RunEnvironmentLayer, RunExecutionLayer, RunLayer,
-        StickyMap, WorkflowSettingsBuilder,
+        EnvironmentImageLayer, EnvironmentNetworkLayer, EnvironmentResourcesLayer, RunCloneLayer,
+        RunEnvironmentLayer, RunExecutionLayer, RunLayer, StickyMap, WorkflowSettingsBuilder,
     };
     use fabro_store::Database;
     use fabro_types::settings::run::RunMode;
     use fabro_types::settings::{InterpString, ModelRef};
-    use fabro_types::{BilledModelUsage, ManifestPath, StageTiming, WorkflowSettings, fixtures};
+    use fabro_types::{
+        BilledModelUsage, ManifestPath, StageTiming, WorkflowSettings, fixtures, test_support,
+    };
     use object_store::memory::InMemory;
 
     use super::*;
@@ -1359,28 +1360,6 @@ reasoning = false
     }
 
     #[test]
-    fn runtime_daytona_config_preserves_volume_mounts() {
-        let settings = settings_from_run_layer(RunLayer {
-            environment: Some(RunEnvironmentLayer {
-                volumes: Some(vec![EnvironmentVolumeLayer {
-                    id:         "vol_auth".to_string(),
-                    mount_path: "/home/daytona/.config".to_string(),
-                    subpath:    Some("agents".to_string()),
-                }]),
-                ..RunEnvironmentLayer::default()
-            }),
-            ..RunLayer::default()
-        });
-
-        let config = resolve_daytona_config(&settings.run);
-
-        assert_eq!(config.volumes.len(), 1);
-        assert_eq!(config.volumes[0].volume_id, "vol_auth");
-        assert_eq!(config.volumes[0].mount_path, "/home/daytona/.config");
-        assert_eq!(config.volumes[0].subpath.as_deref(), Some("agents"));
-    }
-
-    #[test]
     fn start_record_git_options_honor_disabled_run_branch() {
         let mut settings = WorkflowSettings::default();
         settings.run.run_branch.enabled = false;
@@ -1443,7 +1422,7 @@ reasoning = false
                 git: None,
                 fork_source_ref: None,
                 parent_id: None,
-                provenance: None,
+                provenance: test_support::test_run_provenance(),
                 configured_providers: Vec::new(),
                 web_url: None,
             },
@@ -1865,7 +1844,7 @@ reasoning = false
                 git: None,
                 fork_source_ref: None,
                 parent_id: None,
-                provenance: None,
+                provenance: test_support::test_run_provenance(),
                 configured_providers: Vec::new(),
                 web_url: None,
             },

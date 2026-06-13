@@ -36,7 +36,6 @@ fn environment_settings_json() -> serde_json::Value {
             "auto_stop": null
         },
         "labels": {},
-        "volumes": [],
         "env": {}
     })
 }

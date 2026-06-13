@@ -23,13 +23,14 @@ use fabro_llm::types::{Message as LlmMessage, Request as LlmRequest, TokenCounts
 use fabro_model::catalog::LlmCatalogSettings;
 use fabro_model::{Catalog, ModelRef, ProviderId, ReasoningEffort, Speed};
 use fabro_types::settings::ServerAuthMethod;
+use fabro_types::settings::run::EnvironmentProvider;
 use fabro_types::{
     AgentBackend, AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
     InterviewQuestionRecord, Node, Outcome, QuestionType, RunBlobId, RunId, RunSpec,
     SandboxProviderKind, StageContextWindowBreakdownItem, StageContextWindowCategory,
     StageContextWindowCountMethod, StageContextWindowProjection, StageContextWindowStaleness,
     StageContextWindowWarning, StageModelUsage, StageTiming, SuccessReason, SystemActorKind,
-    WorkflowSettings, fixtures,
+    WorkflowSettings, fixtures, test_support,
 };
 use fabro_util::check_report::CheckStatus;
 use fabro_workflow::records::CheckpointExt;
@@ -1226,13 +1227,16 @@ id = "missing"
 #[test]
 fn system_sandbox_provider_uses_manifest_defaults() {
     let temp = tempfile::tempdir().unwrap();
-    let environment_store = EnvironmentStore::load_or_seed(temp.path().join("environments"))
-        .expect("environment store should seed");
+    let environment_dir = temp.path().join("environments");
+    fabro_environment::seed_default_environment(&environment_dir, EnvironmentProvider::Daytona)
+        .expect("seed built-in environments");
+    let environment_store =
+        EnvironmentStore::load(&environment_dir, true).expect("environment store should load");
     let source = r#"
 _version = 1
 
 [run.environment]
-id = "daytona"
+id = "default"
 "#;
     let manifest_run_settings = resolve_manifest_run_settings_with_catalog(
         &run_manifest::manifest_run_defaults(Some(&manifest_run_defaults_from_toml(source))),
@@ -1245,8 +1249,8 @@ id = "daytona"
 #[test]
 fn system_sandbox_provider_defaults_when_manifest_run_settings_do_not_resolve() {
     let temp = tempfile::tempdir().unwrap();
-    let environment_store = EnvironmentStore::load_or_seed(temp.path().join("environments"))
-        .expect("environment store should seed");
+    let environment_store = EnvironmentStore::load(temp.path().join("environments"), true)
+        .expect("environment store should load");
     let source = r#"
 _version = 1
 
@@ -4026,7 +4030,7 @@ async fn append_default_run_created(run_store: &fabro_store::RunDatabase, run_id
         workflow_slug: None,
         automation: None,
         db_prefix: None,
-        provenance: None,
+        provenance: test_support::test_run_provenance(),
         manifest_blob: None,
         git: None,
         fork_source_ref: None,
@@ -4080,7 +4084,7 @@ async fn create_slack_notification_run(
         workflow_slug: workflow_slug.map(str::to_string),
         automation: None,
         db_prefix: None,
-        provenance: None,
+        provenance: test_support::test_run_provenance(),
         manifest_blob: None,
         git: None,
         fork_source_ref: None,
@@ -5087,7 +5091,7 @@ async fn list_run_stages_distinguishes_visits() {
             workflow_slug: Some("test".to_string()),
             automation: None,
             db_prefix: None,
-            provenance: None,
+            provenance: test_support::test_run_provenance(),
             manifest_blob: None,
             git: None,
             fork_source_ref: None,
@@ -5931,6 +5935,12 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
     let (store, artifact_store) = test_store_bundle();
     let vault_path = test_secret_store_path();
     let server_env_path = vault_path.with_file_name("server.env");
+    let active_config_path = vault_path.with_file_name("settings.toml");
+    let environment_dir = active_config_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("environments");
+    fabro_environment::seed_environments(&environment_dir).expect("test environments should seed");
     let config = AppStateConfig {
         resolved_settings: resolved_runtime_settings_for_tests(
             github_token_settings(),
@@ -5947,7 +5957,7 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
         server_secrets: load_test_server_secrets(server_env_path, HashMap::new()),
         env_lookup: Arc::new(env_lookup),
         github_api_base_url,
-        active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
+        active_config_path,
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
         sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
@@ -6144,7 +6154,7 @@ async fn create_completed_run_ready_for_pull_request(
         source_directory: Some("/tmp/project".to_string()),
         git: git.clone(),
         labels: HashMap::new(),
-        provenance: None,
+        provenance: test_support::test_run_provenance(),
         manifest_blob: None,
         definition_blob: None,
         fork_source_ref: None,
@@ -9947,15 +9957,10 @@ async fn run_tool_worker_token_can_use_client_backend_routes_across_runs() {
         .unwrap()
         .expect("created run should be cached");
     assert_eq!(
-        cached
-            .projection
-            .spec
-            .provenance
-            .as_ref()
-            .and_then(|provenance| provenance.subject.as_ref()),
-        Some(&Principal::Worker {
+        cached.projection.spec.provenance.subject,
+        Principal::Worker {
             run_id: parent_run_id,
-        }),
+        },
     );
 
     let response = app
@@ -12314,7 +12319,7 @@ async fn create_preserved_local_sandbox_run(state: &Arc<AppState>, run_id: RunId
             workflow_slug: Some("test".to_string()),
             automation: None,
             db_prefix: None,
-            provenance: None,
+            provenance: test_support::test_run_provenance(),
             manifest_blob: None,
             git: None,
             fork_source_ref: None,
@@ -13066,7 +13071,7 @@ async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
             workflow_slug: Some("test".to_string()),
             automation: None,
             db_prefix: None,
-            provenance: None,
+            provenance: test_support::test_run_provenance(),
             manifest_blob: None,
             git: None,
             fork_source_ref: None,

@@ -28,9 +28,6 @@ import type { EnvironmentProvider } from './environment-provider';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { EnvironmentResourcesSettings } from './environment-resources-settings';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { EnvironmentVolumeSettings } from './environment-volume-settings';
 
 /**
  * Request body for replacing a server-managed environment. The path id is authoritative.
@@ -42,6 +39,5 @@ export interface ReplaceEnvironmentRequest {
     'network': EnvironmentNetworkSettings;
     'lifecycle': EnvironmentLifecycleSettings;
     'labels': { [key: string]: string; };
-    'volumes': Array<EnvironmentVolumeSettings>;
     'env': { [key: string]: string; };
 }

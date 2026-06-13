@@ -134,7 +134,6 @@ models/environment-network-settings.ts
 models/environment-provider.ts
 models/environment-resources-settings.ts
 models/environment-settings.ts
-models/environment-volume-settings.ts
 models/environment.ts
 models/error-response-entry.ts
 models/error-response.ts
@@ -274,7 +273,6 @@ models/preflight-workflow-summary.ts
 models/preview-url-request.ts
 models/preview-url-response.ts
 models/principal-agent.ts
-models/principal-anonymous.ts
 models/principal-slack.ts
 models/principal-system.ts
 models/principal-user.ts

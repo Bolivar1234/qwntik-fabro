@@ -1,15 +1,14 @@
 use fabro_types::settings::run::{
     DockerfileSource, EnvironmentImageSettings, EnvironmentLifecycleSettings,
     EnvironmentNetworkMode, EnvironmentNetworkSettings, EnvironmentProvider,
-    EnvironmentResourcesSettings, EnvironmentSettings, EnvironmentVolumeSettings,
-    RunEnvironmentSettings,
+    EnvironmentResourcesSettings, EnvironmentSettings, RunEnvironmentSettings,
 };
 
 use super::ResolveError;
 use crate::{
     Combine, EnvironmentDockerfileLayer, EnvironmentImageLayer, EnvironmentLayer,
-    EnvironmentLifecycleLayer, EnvironmentNetworkLayer, EnvironmentResourcesLayer,
-    EnvironmentVolumeLayer, MergeMap, RunEnvironmentLayer,
+    EnvironmentLifecycleLayer, EnvironmentNetworkLayer, EnvironmentResourcesLayer, MergeMap,
+    RunEnvironmentLayer,
 };
 
 pub(crate) fn resolve_run_environment(
@@ -77,7 +76,6 @@ fn resolve_environment_fields(
         network: resolve_network(layer.network.as_ref(), &format!("{path}.network"), errors),
         lifecycle: resolve_lifecycle(layer.lifecycle.as_ref()),
         labels: layer.labels.clone().into_inner(),
-        volumes: resolve_volumes(layer.volumes.as_deref()),
         env: layer.env.clone().into_inner(),
     };
     validate_daytona_image_settings(&environment, path, errors);
@@ -172,18 +170,6 @@ fn resolve_lifecycle(layer: Option<&EnvironmentLifecycleLayer>) -> EnvironmentLi
         stop_on_terminal: layer.stop_on_terminal.unwrap_or(true),
         auto_stop:        layer.auto_stop,
     }
-}
-
-fn resolve_volumes(layers: Option<&[EnvironmentVolumeLayer]>) -> Vec<EnvironmentVolumeSettings> {
-    layers
-        .unwrap_or(&[])
-        .iter()
-        .map(|volume| EnvironmentVolumeSettings {
-            id:         volume.id.clone(),
-            mount_path: volume.mount_path.clone(),
-            subpath:    volume.subpath.clone(),
-        })
-        .collect()
 }
 
 fn dockerfile_source(dockerfile: &EnvironmentDockerfileLayer) -> DockerfileSource {

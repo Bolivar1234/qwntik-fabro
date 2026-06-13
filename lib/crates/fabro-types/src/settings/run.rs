@@ -259,11 +259,6 @@ where
     substitute_dockerfile_source(&mut environment.image.dockerfile, lookup)?;
     substitute_string_vec(&mut environment.network.allow, lookup)?;
     substitute_string_map(&mut environment.labels, lookup)?;
-    for volume in &mut environment.volumes {
-        substitute_string(&mut volume.id, lookup)?;
-        substitute_string(&mut volume.mount_path, lookup)?;
-        substitute_option_string(&mut volume.subpath, lookup)?;
-    }
     Ok(())
 }
 
@@ -308,8 +303,8 @@ mod run_namespace_variable_substitution_tests {
 
     use super::{
         ArtifactsSettings, DockerfileSource, EnvironmentImageSettings, EnvironmentNetworkMode,
-        EnvironmentNetworkSettings, EnvironmentVolumeSettings, HookDefinition, HookEvent, HookType,
-        InterpString, McpHttpProtocol, McpServerSettings, McpTransport, RunCheckpointSettings,
+        EnvironmentNetworkSettings, HookDefinition, HookEvent, HookType, InterpString,
+        McpHttpProtocol, McpServerSettings, McpTransport, RunCheckpointSettings,
         RunEnvironmentSettings, RunGoal, RunNamespace, RunPrepareSettings,
     };
 
@@ -431,11 +426,6 @@ mod run_namespace_variable_substitution_tests {
                     allow: vec!["{{ vars.CIDR }}".to_string()],
                 },
                 labels: HashMap::from([("deploy-env".to_string(), "{{ vars.ENV }}".to_string())]),
-                volumes: vec![EnvironmentVolumeSettings {
-                    id:         "vol_{{ vars.ENV }}".to_string(),
-                    mount_path: "/mnt/{{ vars.ENV }}".to_string(),
-                    subpath:    Some("cache/{{ vars.ENV }}".to_string()),
-                }],
                 ..RunEnvironmentSettings::default()
             },
             artifacts: ArtifactsSettings {
@@ -466,12 +456,6 @@ mod run_namespace_variable_substitution_tests {
         assert_eq!(
             run.environment.labels.get("deploy-env").map(String::as_str),
             Some("prod")
-        );
-        assert_eq!(run.environment.volumes[0].id, "vol_prod");
-        assert_eq!(run.environment.volumes[0].mount_path, "/mnt/prod");
-        assert_eq!(
-            run.environment.volumes[0].subpath.as_deref(),
-            Some("cache/prod")
         );
         assert_eq!(run.artifacts.include, vec!["reports/prod/**"]);
     }
@@ -801,13 +785,6 @@ impl Default for EnvironmentLifecycleSettings {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct EnvironmentVolumeSettings {
-    pub id:         String,
-    pub mount_path: String,
-    pub subpath:    Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EnvironmentSettings {
     pub provider:  EnvironmentProvider,
@@ -816,7 +793,6 @@ pub struct EnvironmentSettings {
     pub network:   EnvironmentNetworkSettings,
     pub lifecycle: EnvironmentLifecycleSettings,
     pub labels:    HashMap<String, String>,
-    pub volumes:   Vec<EnvironmentVolumeSettings>,
     pub env:       HashMap<String, InterpString>,
 }
 
@@ -829,7 +805,6 @@ impl Default for EnvironmentSettings {
             network:   EnvironmentNetworkSettings::default(),
             lifecycle: EnvironmentLifecycleSettings::default(),
             labels:    HashMap::new(),
-            volumes:   Vec::new(),
             env:       HashMap::new(),
         }
     }
@@ -844,7 +819,6 @@ pub struct RunEnvironmentSettings {
     pub network:   EnvironmentNetworkSettings,
     pub lifecycle: EnvironmentLifecycleSettings,
     pub labels:    HashMap<String, String>,
-    pub volumes:   Vec<EnvironmentVolumeSettings>,
     pub env:       HashMap<String, InterpString>,
 }
 
@@ -859,7 +833,6 @@ impl RunEnvironmentSettings {
             network: environment.network,
             lifecycle: environment.lifecycle,
             labels: environment.labels,
-            volumes: environment.volumes,
             env: environment.env,
         }
     }

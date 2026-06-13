@@ -282,7 +282,6 @@ memory = "8GB"
 | `lifecycle.stop_on_terminal` | Stop the sandbox when the run reaches a terminal state. |
 | `lifecycle.auto_stop` | Daytona auto-stop duration, such as `"30m"`. |
 | `labels` | Provider labels. Merge by key across layers. |
-| `volumes` | Provider volume hints. Lists replace wholesale across layers. |
 | `env` | Environment variables passed to command and agent execution. Merge by key across layers. |
 
 When `provider = "local"`, Fabro runs directly in the resolved working
@@ -559,7 +558,7 @@ provider = "daytona"
 dockerfile = { path = "Dockerfile" }
 ```
 
-Project defaults and workflow config values merge per the normative merge matrix: most fields merge by field (higher-precedence wins per key), TOML `run.inputs` tables replace wholesale, CLI input flags merge per key at highest precedence, environment `env` and `labels` merge by key, environment `volumes` replace as a whole list, and `run.prepare.steps` replaces whole-list.
+Project defaults and workflow config values merge per the normative merge matrix: most fields merge by field (higher-precedence wins per key), TOML `run.inputs` tables replace wholesale, CLI input flags merge per key at highest precedence, environment `env` and `labels` merge by key, and `run.prepare.steps` replaces whole-list.
 
 ### Machine defaults
 

@@ -27,7 +27,9 @@ use fabro_static::EnvVars;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{EnvironmentProvider, RunGoal, RunNamespace};
-use fabro_types::{ManifestPath, RunId, SandboxProviderKind, ServerSettings, WorkflowSettings};
+use fabro_types::{
+    ManifestPath, RunId, RunProvenance, SandboxProviderKind, ServerSettings, WorkflowSettings,
+};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
 use fabro_workflow::Error as WorkflowError;
@@ -194,6 +196,7 @@ pub(crate) fn validate_prepared_manifest(
 pub(crate) fn create_run_input(
     prepared: PreparedManifest,
     configured_providers: Vec<ProviderId>,
+    provenance: RunProvenance,
     web_url: Option<String>,
 ) -> CreateRunInput {
     CreateRunInput {
@@ -210,7 +213,7 @@ pub(crate) fn create_run_input(
         git: prepared.git,
         fork_source_ref: None,
         parent_id: prepared.parent_id,
-        provenance: None,
+        provenance,
         configured_providers,
         web_url,
     }
@@ -672,9 +675,6 @@ fn environment_capability_warnings(resolved_run: &RunNamespace) -> Vec<String> {
             {
                 warnings.push("local provider ignores resource limits".to_string());
             }
-            if !environment.volumes.is_empty() {
-                warnings.push("local provider ignores volume mounts".to_string());
-            }
             if !environment.labels.is_empty() {
                 warnings.push("local provider ignores labels".to_string());
             }
@@ -685,9 +685,6 @@ fn environment_capability_warnings(resolved_run: &RunNamespace) -> Vec<String> {
         EnvironmentProvider::Docker => {
             if environment.resources.disk.is_some() {
                 warnings.push("docker provider ignores disk resource limits".to_string());
-            }
-            if !environment.volumes.is_empty() {
-                warnings.push("docker provider ignores volume mounts".to_string());
             }
             if !environment.labels.is_empty() {
                 warnings.push("docker provider ignores labels".to_string());
@@ -1526,27 +1523,6 @@ enabled = {clone_enabled}
         (prepared, resolved)
     }
 
-    #[test]
-    fn runtime_daytona_config_preserves_volume_mounts() {
-        let settings = fabro_types::settings::run::RunEnvironmentSettings::from_environment(
-            "cloud".to_string(),
-            fabro_types::settings::run::EnvironmentSettings {
-                volumes: vec![fabro_types::settings::run::EnvironmentVolumeSettings {
-                    id:         "vol_auth".to_string(),
-                    mount_path: "/home/daytona/.config".to_string(),
-                    subpath:    Some("agents".to_string()),
-                }],
-                ..fabro_types::settings::run::EnvironmentSettings::default()
-            },
-        );
-
-        let config = daytona_config_from_environment(&settings, false);
-
-        assert_eq!(config.volumes.len(), 1);
-        assert_eq!(config.volumes[0].volume_id, "vol_auth");
-        assert_eq!(config.volumes[0].mount_path, "/home/daytona/.config");
-        assert_eq!(config.volumes[0].subpath.as_deref(), Some("agents"));
-    }
     #[test]
     fn prepare_manifest_accepts_project_environment_catalog_definitions() {
         let mut manifest = minimal_manifest();

@@ -21,8 +21,6 @@ pub struct EnvironmentLayer {
     pub lifecycle: Option<EnvironmentLifecycleLayer>,
     #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
     pub labels:    StickyMap<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub volumes:   Option<Vec<EnvironmentVolumeLayer>>,
     #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
     pub env:       StickyMap<InterpString>,
 }
@@ -42,8 +40,6 @@ pub struct RunEnvironmentLayer {
     pub lifecycle: Option<EnvironmentLifecycleLayer>,
     #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
     pub labels:    StickyMap<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub volumes:   Option<Vec<EnvironmentVolumeLayer>>,
     #[serde(default, skip_serializing_if = "StickyMap::is_empty")]
     pub env:       StickyMap<InterpString>,
 }
@@ -58,7 +54,6 @@ impl RunEnvironmentLayer {
             network:   self.network,
             lifecycle: self.lifecycle,
             labels:    self.labels,
-            volumes:   self.volumes,
             env:       self.env,
         }
     }
@@ -115,15 +110,6 @@ pub struct EnvironmentLifecycleLayer {
     pub stop_on_terminal: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_stop:        Option<Duration>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EnvironmentVolumeLayer {
-    pub id:         String,
-    pub mount_path: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subpath:    Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -34,7 +34,6 @@ fn environment_settings(provider: &str) -> Value {
             "auto_stop": null
         },
         "labels": {},
-        "volumes": [],
         "env": {}
     })
 }
@@ -160,7 +159,7 @@ async fn list_environments_returns_seeded_catalog_sorted_by_id() {
         .expect("list environments should respond");
     let body = response_json(response, StatusCode::OK, "GET /api/v1/environments").await;
 
-    assert_eq!(body["meta"]["total"], 4);
+    assert_eq!(body["meta"]["total"], 2);
     assert_eq!(
         body["data"]
             .as_array()
@@ -170,7 +169,7 @@ async fn list_environments_returns_seeded_catalog_sorted_by_id() {
                 .as_str()
                 .expect("environment should have id"))
             .collect::<Vec<_>>(),
-        vec!["daytona", "default", "docker", "local"]
+        vec!["default", "local"]
     );
 }
 
@@ -202,7 +201,7 @@ async fn create_environment_persists_sibling_toml_and_is_visible() {
         .await
         .expect("list environments should respond");
     let list = response_json(list, StatusCode::OK, "GET /api/v1/environments").await;
-    assert_eq!(list["meta"]["total"], 5);
+    assert_eq!(list["meta"]["total"], 3);
     assert!(
         list["data"]
             .as_array()
@@ -408,6 +407,71 @@ async fn duplicate_environment_create_returns_conflict() {
 }
 
 #[tokio::test]
+async fn reserved_local_environment_cannot_be_created_or_modified() {
+    let (app, _temp_dir, _environment_dir) = environment_app();
+
+    // `local` is reserved: creating it is rejected with a conflict.
+    let created = app
+        .clone()
+        .oneshot(json_request(
+            Method::POST,
+            "/environments",
+            &environment_body("local", "local"),
+        ))
+        .await
+        .expect("reserved create should respond");
+    response_status(
+        created,
+        StatusCode::CONFLICT,
+        "POST /api/v1/environments local",
+    )
+    .await;
+
+    // It is synthesized in memory (local provider enabled) and readable.
+    let local = app
+        .clone()
+        .oneshot(empty_request(Method::GET, "/environments/local"))
+        .await
+        .expect("get local should respond");
+    let local = response_json(local, StatusCode::OK, "GET /api/v1/environments/local").await;
+    let revision = revision_from(&local);
+
+    // Replace and delete are rejected even with a valid If-Match.
+    let replaced = app
+        .clone()
+        .oneshot(request_with_if_match(
+            Method::PUT,
+            "/environments/local",
+            &format!("\"{revision}\""),
+            Some(environment_settings("local")),
+        ))
+        .await
+        .expect("reserved replace should respond");
+    response_status(
+        replaced,
+        StatusCode::CONFLICT,
+        "PUT /api/v1/environments/local",
+    )
+    .await;
+
+    let deleted = app
+        .oneshot(request_with_if_match(
+            Method::DELETE,
+            "/environments/local",
+            &format!("\"{revision}\""),
+            None,
+        ))
+        .await
+        .expect("reserved delete should respond");
+    response_status(
+        deleted,
+        StatusCode::CONFLICT,
+        "DELETE /api/v1/environments/local",
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn invalid_environment_id_and_if_match_return_bad_request() {
     let (app, _temp_dir, _environment_dir) = environment_app();
 
@@ -509,7 +573,7 @@ async fn dockerfile_path_over_rest_is_rejected_without_persisting_or_exposing_co
 }
 
 #[tokio::test]
-async fn delete_environment_removes_non_default_and_default_is_protected() {
+async fn delete_environment_removes_non_default_and_default_is_deletable() {
     let (app, _temp_dir, environment_dir) = environment_app();
     let created = create_environment(&app, "delete-env", "local").await;
     let revision = revision_from(&created);
@@ -544,13 +608,16 @@ async fn delete_environment_removes_non_default_and_default_is_protected() {
     )
     .await;
 
+    // `default` is an ordinary environment: it can be deleted, which removes the
+    // run fallback. The server no longer protects it.
     let default = app
         .clone()
         .oneshot(empty_request(Method::GET, "/environments/default"))
         .await
         .expect("get default environment should respond");
     let default = response_json(default, StatusCode::OK, "GET /api/v1/environments/default").await;
-    let protected = app
+    let deleted = app
+        .clone()
         .oneshot(request_with_if_match(
             Method::DELETE,
             "/environments/default",
@@ -560,9 +627,21 @@ async fn delete_environment_removes_non_default_and_default_is_protected() {
         .await
         .expect("delete default environment should respond");
     response_status(
-        protected,
-        StatusCode::CONFLICT,
+        deleted,
+        StatusCode::NO_CONTENT,
         "DELETE /api/v1/environments/default",
+    )
+    .await;
+
+    assert!(!environment_dir.join("default.toml").exists());
+    let missing_default = app
+        .oneshot(empty_request(Method::GET, "/environments/default"))
+        .await
+        .expect("get deleted default environment should respond");
+    response_status(
+        missing_default,
+        StatusCode::NOT_FOUND,
+        "GET /api/v1/environments/default after delete",
     )
     .await;
 }

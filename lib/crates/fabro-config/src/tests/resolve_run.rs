@@ -131,11 +131,6 @@ auto_stop = "30m"
 [environments.fabro-dev.labels]
 repo = "fabro-sh/fabro"
 
-[[environments.fabro-dev.volumes]]
-id = "vol_auth"
-mount_path = "/home/daytona/.config"
-subpath = "agents"
-
 [environments.fabro-dev.env]
 NODE_ENV = "development"
 "#,
@@ -174,10 +169,6 @@ NODE_ENV = "development"
         environment.labels.get("repo").map(String::as_str),
         Some("fabro-sh/fabro")
     );
-    assert_eq!(environment.volumes.len(), 1);
-    assert_eq!(environment.volumes[0].id, "vol_auth");
-    assert_eq!(environment.volumes[0].mount_path, "/home/daytona/.config");
-    assert_eq!(environment.volumes[0].subpath.as_deref(), Some("agents"));
     assert_eq!(
         environment
             .env

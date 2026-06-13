@@ -1600,6 +1600,7 @@ mod tests {
     use fabro_types::{
         EventEnvelope, FailureReason, Run, RunId, RunLifecycle, RunLinks, RunOrigin,
         RunPairStatusResponse, RunProjection, RunStatus, RunTimestamps, SuccessReason, WorkflowRef,
+        test_support,
     };
     use fabro_vault::{SecretType, Vault};
     use futures::stream;
@@ -2192,7 +2193,7 @@ reasoning = false
             },
             automation: None,
             repository: None,
-            created_by: None,
+            created_by: test_support::test_principal(),
             origin: RunOrigin::default(),
             labels: HashMap::new(),
             lifecycle: RunLifecycle {

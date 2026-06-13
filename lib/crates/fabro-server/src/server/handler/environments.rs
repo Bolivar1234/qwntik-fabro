@@ -7,7 +7,7 @@ use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
     DockerfileSource, EnvironmentImageSettings, EnvironmentLifecycleSettings,
     EnvironmentNetworkSettings, EnvironmentProvider, EnvironmentResourcesSettings,
-    EnvironmentSettings, EnvironmentVolumeSettings,
+    EnvironmentSettings,
 };
 use serde::de::IgnoredAny;
 use serde::{Deserialize, Serialize};
@@ -39,7 +39,6 @@ struct CreateEnvironmentRequest {
     network:   EnvironmentNetworkSettings,
     lifecycle: EnvironmentLifecycleSettings,
     labels:    HashMap<String, String>,
-    volumes:   Vec<EnvironmentVolumeSettings>,
     env:       HashMap<String, InterpString>,
 }
 
@@ -52,7 +51,6 @@ struct ReplaceEnvironmentRequest {
     network:   EnvironmentNetworkSettings,
     lifecycle: EnvironmentLifecycleSettings,
     labels:    HashMap<String, String>,
-    volumes:   Vec<EnvironmentVolumeSettings>,
     env:       HashMap<String, InterpString>,
 }
 
@@ -88,7 +86,6 @@ impl CreateEnvironmentRequest {
                 network:   self.network,
                 lifecycle: self.lifecycle,
                 labels:    self.labels,
-                volumes:   self.volumes,
                 env:       self.env,
             },
         })
@@ -104,7 +101,6 @@ impl ReplaceEnvironmentRequest {
             network:   self.network,
             lifecycle: self.lifecycle,
             labels:    self.labels,
-            volumes:   self.volumes,
             env:       self.env,
         })
     }
@@ -240,9 +236,9 @@ impl From<EnvironmentStoreError> for ApiError {
                 StatusCode::CONFLICT,
                 format!("environment revision is stale: {id}"),
             ),
-            EnvironmentStoreError::Protected { id } => Self::new(
+            EnvironmentStoreError::Reserved { id } => Self::new(
                 StatusCode::CONFLICT,
-                format!("environment is protected and cannot be deleted: {id}"),
+                format!("environment is reserved and cannot be modified: {id}"),
             ),
             EnvironmentStoreError::Validation { source } => {
                 Self::new(StatusCode::UNPROCESSABLE_ENTITY, source.to_string())

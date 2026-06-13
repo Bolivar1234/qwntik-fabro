@@ -5,7 +5,7 @@ description: "Reusable named execution environments for workflow runs"
 
 Fabro separates **environments** from **sandboxes**:
 
-- An **environment** is reusable desired configuration: provider, image, resources, network, lifecycle, labels, volumes, and environment variables.
+- An **environment** is reusable desired configuration: provider, image, resources, network, lifecycle, labels, and environment variables.
 - A **sandbox** is the concrete runtime instance Fabro creates for a run from the selected environment.
 
 <Warning>
@@ -52,11 +52,6 @@ auto_stop = "30m"
 [labels]
 repo = "fabro-sh/fabro"
 
-[[volumes]]
-id = "vol-agent-state"
-mount_path = "/home/daytona/agent-state"
-subpath = "auth"
-
 [env]
 NODE_ENV = "development"
 ```
@@ -72,6 +67,26 @@ provider = "daytona"
 
 [environments.fabro-dev.image]
 dockerfile = { path = "Dockerfile" }
+
+[environments.fabro-dev.resources]
+cpu = 8
+memory = "16GB"
+disk = "20GB"
+
+[environments.fabro-dev.network]
+mode = "cidr_allow_list"       # allow_all | block | cidr_allow_list
+allow = ["10.0.0.0/8"]
+
+[environments.fabro-dev.lifecycle]
+preserve = false
+stop_on_terminal = true
+auto_stop = "30m"
+
+[environments.fabro-dev.labels]
+repo = "fabro-sh/fabro"
+
+[environments.fabro-dev.env]
+NODE_ENV = "development"
 ```
 
 Run-level overrides are sparse and apply only to the selected environment:
@@ -87,7 +102,7 @@ memory = "32GB"
 preserve = true
 ```
 
-`env` and `labels` merge by key. `volumes` replace as a whole list when set at a higher-precedence layer.
+`env` and `labels` merge by key.
 
 ## Selecting an environment from the CLI
 
@@ -133,7 +148,6 @@ stop_on_terminal = true
 | `network.mode = "block"` | Error | Docker `none` network | Daytona block |
 | `network.mode = "cidr_allow_list"` | Error | Error | Daytona CIDR allow-list |
 | `labels` | Warning; ignored | Warning; ignored | Daytona labels |
-| `volumes` | Warning; ignored | Warning; ignored | Daytona volume mounts |
 | `lifecycle.auto_stop` | Warning; ignored | Warning; ignored | Daytona auto-stop |
 | `env` | Process environment overlay | Container environment | Sandbox environment |
 
@@ -188,13 +202,4 @@ auto_stop = "30m"
 [network]
 mode = "cidr_allow_list"
 allow = ["208.80.154.232/32", "10.0.0.0/8"]
-```
-
-Daytona volumes reference existing provider-managed volumes:
-
-```toml title="environments/cloud.toml"
-[[volumes]]
-id = "vol-agent-state"
-mount_path = "/home/daytona/agent-state"
-subpath = "agent-auth"
 ```
