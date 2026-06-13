@@ -1,5 +1,10 @@
 _version = 1
 
+# dev-token: single static token for headless LibreFang→Fabro API access.
+# The token value is read from FABRO_DEV_TOKEN env var at runtime.
+[server.auth]
+methods = ["dev-token"]
+
 # ccflare: Qwntik's Claude Code OAuth load-balancer on Hetzner.
 # Fabro appends /messages; ccflare strips /v1/claude-code and forwards /v1/messages.
 # The trailing /v1 in base_url is required for ccflare's routing format.

@@ -21,6 +21,13 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      # Token format: fabro_dev_ + 64 hex chars.
+      # Generate: echo "fabro_dev_$(openssl rand -hex 32)"
+      # Store all three vars in .env alongside this file.
+      FABRO_DEV_TOKEN: "${FABRO_DEV_TOKEN}"
+      # Required when server.auth.methods is set.
+      # Generate: openssl rand -hex 32
+      SESSION_SECRET: "${SESSION_SECRET}"
     env_file:
       - path: .env
         required: false
