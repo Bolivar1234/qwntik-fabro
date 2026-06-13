@@ -2,3 +2,4 @@
 !docker/entrypoint.sh
 !docker/settings.toml
 !tmp/docker-context/**
+!qwntik/**
