@@ -13,9 +13,10 @@ if [ "$(id -u)" = 0 ]; then
     fi
 
     # Seed workflow templates — skip files that already exist.
-    if [ -d /etc/fabro/workflows ] && [ "$(ls -A /etc/fabro/workflows 2>/dev/null)" ]; then
+    # Use find to avoid busybox sh glob-failure on empty dirs.
+    if [ -d /etc/fabro/workflows ]; then
         mkdir -p "${FABRO_HOME_DIR}/workflows"
-        for f in /etc/fabro/workflows/*; do
+        find /etc/fabro/workflows -maxdepth 1 -type f | while read -r f; do
             dest="${FABRO_HOME_DIR}/workflows/$(basename "$f")"
             [ ! -f "$dest" ] && cp "$f" "$dest"
         done

@@ -11,8 +11,9 @@ FROM ghcr.io/fabro-sh/fabro:nightly
 USER root
 
 COPY qwntik/settings.default.toml /etc/fabro/settings.default.toml
-COPY qwntik/workflows/             /etc/fabro/workflows/
 COPY --chmod=0755 qwntik/entrypoint.sh /usr/local/bin/qwntik-entrypoint
+# Create empty workflows dir; populated at runtime via entrypoint when templates are added.
+RUN mkdir -p /etc/fabro/workflows
 
 ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/qwntik-entrypoint"]
 CMD ["sh", "-c", "exec fabro server start --foreground --bind 0.0.0.0:${PORT:-32276}"]
