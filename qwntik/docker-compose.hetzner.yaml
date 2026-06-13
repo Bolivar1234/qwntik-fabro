@@ -4,11 +4,12 @@
 #   docker compose -f qwntik/docker-compose.hetzner.yaml up -d
 #
 # Requires:
-#   - ANTHROPIC_API_KEY in env or .env (used by ccflare for auth header passthrough)
-#   - ccflare running on localhost:8088 (daxiom-ccflare-1 container, same host)
+#   - ANTHROPIC_API_KEY, FABRO_DEV_TOKEN, SESSION_SECRET in .env
+#   - daxiom compose project running (provides daxiom_default network + ccflare)
 #
-# Fabro API is exposed only on 127.0.0.1:7788 — LibreFang agents call it internally.
-# To expose externally, add a reverse proxy (nginx/caddy) with auth.
+# Fabro is reachable:
+#   - From host:                http://127.0.0.1:7788
+#   - From daxiom containers:   http://fabro:32276  (alias on daxiom_default)
 
 services:
   qwntik-fabro:
@@ -16,6 +17,9 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:7788:32276"
+    networks:
+      - default
+      - daxiom_default
     volumes:
       - qwntik-fabro-storage:/storage
       - /var/run/docker.sock:/var/run/docker.sock
@@ -23,7 +27,6 @@ services:
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
       # Token format: fabro_dev_ + 64 hex chars.
       # Generate: echo "fabro_dev_$(openssl rand -hex 32)"
-      # Store all three vars in .env alongside this file.
       FABRO_DEV_TOKEN: "${FABRO_DEV_TOKEN}"
       # Required when server.auth.methods is set.
       # Generate: openssl rand -hex 32
@@ -40,3 +43,8 @@ services:
 
 volumes:
   qwntik-fabro-storage:
+
+networks:
+  default: {}
+  daxiom_default:
+    external: true

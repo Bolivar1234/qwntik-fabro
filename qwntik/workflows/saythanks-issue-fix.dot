@@ -1,0 +1,154 @@
+// saythanks-issue-fix.dot
+// Fabro workflow: fix one saythanks GitHub issue end-to-end.
+//
+// Params (passed by fabro-supervisor at run creation):
+//   issue_number  - GitHub issue number
+//   repo          - always "saythanks"
+//   context_pack  - JSON blob from SUPERB: title, body, labels, related ADRs
+//
+// Gate nodes require human approval; all other nodes are automated.
+// On any node failure the run transitions to the built-in `failed` terminal.
+
+digraph saythanks_issue_fix {
+  // ── entry ─────────────────────────────────────────────────────────────────
+  start [
+    label     = "start"
+    type      = "start"
+  ]
+
+  // ── context load ──────────────────────────────────────────────────────────
+  // fabro-context queries SUPERB for codebase patterns, ADR decisions,
+  // related closed issues, and prior PR outcomes for this issue area.
+  context_load [
+    label     = "Load context from SUPERB"
+    type      = "agent"
+    agent     = "fabro-context"
+    prompt    = "Load full context for issue #${issue_number} in repo ${repo}. Query SUPERB knowledge.* lane for: related ADRs, prior PR outcomes in this area, current open issues in the same cluster, and codebase ownership map for the affected files. Return a context_pack JSON blob."
+    timeout   = "5m"
+  ]
+
+  // ── ambiguity gate ────────────────────────────────────────────────────────
+  // If context_load flags the issue as needing a human decision before work
+  // starts (schema change, auth behaviour, API design), pause here.
+  clarify_gate [
+    label     = "Clarification needed?"
+    type      = "gate"
+    question  = "Issue #${issue_number} requires a decision before implementation.\n\nContext: ${context_pack.clarification_needed_reason}\n\nOptions:\n  proceed  — continue with the proposed approach\n  skip     — park this issue and move to the next\n  redesign — provide a new direction in free text"
+    options   = ["proceed", "skip", "redesign"]
+    condition = "${context_pack.clarification_needed}"
+  ]
+
+  // ── implement ─────────────────────────────────────────────────────────────
+  implement [
+    label     = "Implement fix"
+    type      = "agent"
+    agent     = "fabro-executor"
+    prompt    = "Fix issue #${issue_number}: ${context_pack.title}\n\nIssue body:\n${context_pack.body}\n\nContext pack (ADRs, related files, patterns):\n${context_pack.summary}\n\nCreate branch fix/issue-${issue_number}, implement, run tests, push. Return STATUS/BRANCH/COMMIT/TESTS_PASSED/PR_READY."
+    timeout   = "45m"
+    retries   = 1
+  ]
+
+  // ── test gate: tests failed ───────────────────────────────────────────────
+  // If fabro-executor reports TESTS_PASSED=false, give it one supervised retry
+  // with the failure detail. If it fails again, escalate to human.
+  test_failure_gate [
+    label     = "Tests failed — retry or escalate?"
+    type      = "gate"
+    question  = "fabro-executor reported test failures on issue #${issue_number}.\n\nFailure detail:\n${implement.FAILURE_DETAIL}\n\nOptions:\n  retry  — spawn executor again with failure context\n  skip   — park this issue\n  manual — take over manually"
+    options   = ["retry", "skip", "manual"]
+    condition = "${implement.TESTS_PASSED == false}"
+  ]
+
+  // ── PR create ─────────────────────────────────────────────────────────────
+  pr_create [
+    label     = "Create pull request"
+    type      = "agent"
+    agent     = "fabro-supervisor"
+    prompt    = "Create a GitHub PR for branch ${implement.BRANCH} targeting main on repo saythanks. Title: fix(issue-${issue_number}): ${context_pack.title}. Body: closes #${issue_number}. Link the commit ${implement.COMMIT}. Return the PR URL."
+    timeout   = "5m"
+  ]
+
+  // ── audit gate ────────────────────────────────────────────────────────────
+  // fabro-auditor runs a fresh-eyes review of the diff.
+  // Verdict APPROVE passes through; BLOCKER re-enters implement for a revision.
+  audit [
+    label     = "Audit PR diff"
+    type      = "agent"
+    agent     = "fabro-auditor"
+    prompt    = "Run a fresh-eyes review of the diff on branch ${implement.BRANCH} for issue #${issue_number}. Read AGENTS.md first. Review the changed files for correctness, test coverage, and regressions. Return verdict: APPROVE or BLOCKER with specific findings."
+    timeout   = "15m"
+  ]
+
+  audit_blocker_gate [
+    label     = "Audit found blockers?"
+    type      = "gate"
+    question  = "fabro-auditor found blockers on issue #${issue_number}.\n\nFindings:\n${audit.findings}\n\nOptions:\n  revise  — send back to executor with findings\n  override — accept despite findings (add reason)\n  skip    — park this issue"
+    options   = ["revise", "override", "skip"]
+    condition = "${audit.verdict == 'BLOCKER'}"
+  ]
+
+  // ── human review gate ─────────────────────────────────────────────────────
+  // Hard human gate before merge. Always requires explicit approval.
+  human_review [
+    label     = "Human PR review"
+    type      = "gate"
+    question  = "PR ready for review on issue #${issue_number}.\n\nPR: ${pr_create.pr_url}\nBranch: ${implement.BRANCH}\nCommit: ${implement.COMMIT}\nAudit: ${audit.verdict}\n\nOptions:\n  approve — merge the PR\n  request_changes — provide feedback (free text)\n  close   — close without merging"
+    options   = ["approve", "request_changes", "close"]
+  ]
+
+  // ── merge ─────────────────────────────────────────────────────────────────
+  merge [
+    label     = "Merge PR"
+    type      = "agent"
+    agent     = "fabro-supervisor"
+    prompt    = "Merge PR ${pr_create.pr_url} via squash merge. Confirm the merge succeeded and report the merge commit SHA."
+    timeout   = "5m"
+  ]
+
+  // ── capture learnings ─────────────────────────────────────────────────────
+  capture [
+    label     = "Capture learnings to SUPERB"
+    type      = "agent"
+    agent     = "fabro-supervisor"
+    prompt    = "Write run outcome to SUPERB knowledge.* lane as a capture-review candidate. Key: fabro/issues/${issue_number}/outcome. Record: issue_number, branch, commit, pr_url, audit_verdict, merge_sha, lessons_learned from this run. Update issue state to merged at fabro/issues/${issue_number}/state."
+    timeout   = "3m"
+  ]
+
+  // ── terminals ─────────────────────────────────────────────────────────────
+  skipped  [label = "skipped"  type = "terminal"]
+  done     [label = "done"     type = "terminal"]
+
+  // ── edges ─────────────────────────────────────────────────────────────────
+  start              -> context_load
+
+  context_load       -> clarify_gate       [label = "clarification_needed=true"]
+  context_load       -> implement          [label = "clarification_needed=false"]
+
+  clarify_gate       -> implement          [label = "proceed"]
+  clarify_gate       -> skipped            [label = "skip"]
+  clarify_gate       -> implement          [label = "redesign"]  // supervisor updates context_pack first
+
+  implement          -> test_failure_gate  [label = "TESTS_PASSED=false"]
+  implement          -> pr_create          [label = "STATUS=completed"]
+  implement          -> skipped            [label = "STATUS=blocked"]
+
+  test_failure_gate  -> implement          [label = "retry"]
+  test_failure_gate  -> skipped            [label = "skip"]
+  test_failure_gate  -> human_review       [label = "manual"]  // escalate with failure context
+
+  pr_create          -> audit
+
+  audit              -> audit_blocker_gate [label = "verdict=BLOCKER"]
+  audit              -> human_review       [label = "verdict=APPROVE"]
+
+  audit_blocker_gate -> implement          [label = "revise"]
+  audit_blocker_gate -> human_review       [label = "override"]
+  audit_blocker_gate -> skipped            [label = "skip"]
+
+  human_review       -> merge              [label = "approve"]
+  human_review       -> implement          [label = "request_changes"]  // feedback injected into context
+  human_review       -> skipped            [label = "close"]
+
+  merge              -> capture
+  capture            -> done
+}
