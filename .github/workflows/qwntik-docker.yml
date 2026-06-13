@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'qwntik/**'
+      - '.dockerignore'
       - '.github/workflows/qwntik-docker.yml'
   workflow_dispatch:
 
