@@ -1,0 +1,18 @@
+_version = 1
+
+# ccflare: Qwntik's Claude Code OAuth load-balancer on Hetzner.
+# Fabro appends /messages; ccflare strips /v1/claude-code and forwards /v1/messages.
+# The trailing /v1 in base_url is required for ccflare's routing format.
+[llm.providers.ccflare]
+display_name = "ccflare (Qwntik Claude Router)"
+adapter = "anthropic"
+base_url = "http://localhost:8088/v1/claude-code/v1"
+
+[llm.providers.ccflare.auth]
+credentials = ["env:ANTHROPIC_API_KEY"]
+
+# Default all runs to Sonnet via ccflare.
+# Opus triggers rolling rate limits on ccflare accounts; Sonnet clears reliably.
+[run.model]
+name     = "claude-sonnet-4-6"
+provider = "ccflare"

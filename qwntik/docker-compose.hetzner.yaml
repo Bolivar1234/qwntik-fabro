@@ -1,0 +1,35 @@
+# Hetzner deployment for qwntik-fabro.
+#
+# Usage:
+#   docker compose -f qwntik/docker-compose.hetzner.yaml up -d
+#
+# Requires:
+#   - ANTHROPIC_API_KEY in env or .env (used by ccflare for auth header passthrough)
+#   - ccflare running on localhost:8088 (daxiom-ccflare-1 container, same host)
+#
+# Fabro API is exposed only on 127.0.0.1:7788 — LibreFang agents call it internally.
+# To expose externally, add a reverse proxy (nginx/caddy) with auth.
+
+services:
+  qwntik-fabro:
+    image: ghcr.io/bolivar1234/qwntik-fabro:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7788:32276"
+    volumes:
+      - qwntik-fabro-storage:/storage
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+    env_file:
+      - path: .env
+        required: false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:32276/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  qwntik-fabro-storage:
