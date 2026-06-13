@@ -11,7 +11,7 @@ methods = ["dev-token"]
 [llm.providers.ccflare]
 display_name = "ccflare (Qwntik Claude Router)"
 adapter = "anthropic"
-base_url = "http://localhost:8088/v1/claude-code/v1"
+base_url = "http://ccflare:8080/v1/claude-code/v1"
 
 [llm.providers.ccflare.auth]
 credentials = ["env:ANTHROPIC_API_KEY"]
